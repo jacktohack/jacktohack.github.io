@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Kernel module lifecycle: build, load, observation, and removal in a QEMU guest.">
+  <title>Kernel Module Lifecycle — LKMPG — Jack Byun</title>
+  <link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="site-header"><div class="wrap">
+    <a class="brand" href="../../">Jack Byun</a>
+    <nav aria-label="Main navigation"><a href="../">Study Notes</a> <a href="../../projects/">Projects</a> <a href="../../contributions/">Upstream Contributions</a></nav>
+  </div></header>
+  <main class="wrap article" id="content">
+    <p class="breadcrumbs"><a href="../">Study Notes</a> / <a href="./">LKMPG</a></p>
+<h1 id="kernel-module-lifecycle">Kernel Module Lifecycle</h1>
+    <p class="article-dates">Created <time datetime="2026-09-29">29 September 2026</time> · Last edited <time datetime="2026-09-29">29 September 2026</time></p>
+<p>This note explains where Linux kernel modules run, how Kbuild turns source into a loadable module, and how initialization and cleanup define its lifecycle. It also covers module parameters, kernel-build compatibility, and the tools and logs used to verify loading and removal in a QEMU guest.</p>
+<nav class="toc-box" aria-labelledby="table-of-contents">
+
+<h2 id="table-of-contents">Table of contents</h2>
+<ul>
+<li><a href="#1-a-module-adds-code-and-data-but-it-is-not-a-process">1. A module adds code and data, but it is not a process</a>
+<ul>
+<li><a href="#11-a-loaded-module-becomes-part-of-the-running-kernel">1.1 A loaded module becomes part of the running kernel</a></li>
+<li><a href="#12-a-module-has-no-pid-private-stack-or-userspace-heap">1.2 A module has no PID, private stack, or userspace heap</a></li>
+<li><a href="#13-module-functions-run-in-the-context-that-calls-them">1.3 Module functions run in the context that calls them</a></li>
+</ul></li>
+<li><a href="#2-module-experiments-run-in-a-separate-qemu-guest-kernel">2. Module experiments run in a separate QEMU guest kernel</a>
+<ul>
+<li><a href="#21-helloko-runs-in-the-guest-kernel-not-host-userspace">2.1 <code>hello.ko</code> runs in the guest kernel, not host userspace</a></li>
+<li><a href="#22-guest-setup-boot-files-debugging-symbols-and-file-sharing">2.2 Guest setup: boot files, debugging symbols, and file sharing</a></li>
+<li><a href="#23-the-target-kernel-not-the-compilers-location-determines-compatibility">2.3 The target kernel, not the compiler's location, determines compatibility</a></li>
+</ul></li>
+<li><a href="#3-kbuild-turns-helloc-into-a-loadable-helloko">3. Kbuild turns <code>hello.c</code> into a loadable <code>hello.ko</code></a>
+<ul>
+<li><a href="#31-headers-expose-interfaces-they-are-not-separately-linked-libraries">3.1 Headers expose interfaces; they are not separately linked libraries</a></li>
+<li><a href="#32-elf-objects-carry-code-data-symbols-and-relocations">3.2 ELF objects carry code, data, symbols, and relocations</a></li>
+<li><a href="#33-kbuild-applies-kernel-rules-and-modpost-checks-module-information">3.3 Kbuild applies kernel rules, and modpost checks module information</a></li>
+<li><a href="#34-the-external-module-makefile-tells-target-kbuild-what-to-build">3.4 The external-module Makefile tells target Kbuild what to build</a></li>
+<li><a href="#35-kbuild-selects-built-in-or-module-output-and-combines-objects">3.5 Kbuild selects built-in or module output and combines objects</a></li>
+</ul></li>
+<li><a href="#4-initialization-makes-the-module-usable-cleanup-reverses-it">4. Initialization makes the module usable; cleanup reverses it</a>
+<ul>
+<li><a href="#41-module_init-and-module_exit-identify-lifecycle-callbacks">4.1 <code>module_init()</code> and <code>module_exit()</code> identify lifecycle callbacks</a></li>
+<li><a href="#42-__init-and-__exit-describe-lifetime-not-which-callback-is-selected">4.2 <code>__init</code> and <code>__exit</code> describe lifetime, not which callback is selected</a></li>
+<li><a href="#43-file-scope-static-keeps-a-name-inside-one-c-source-file">4.3 File-scope <code>static</code> keeps a name inside one C source file</a></li>
+<li><a href="#44-resources-need-cleanup-on-initialization-failure-and-removal">4.4 Resources need cleanup on initialization failure and removal</a></li>
+</ul></li>
+<li><a href="#5-verifying-a-module-lifecycle-with-tools-and-kernel-logs">5. Verifying a module lifecycle with tools and kernel logs</a>
+<ul>
+<li><a href="#51-modinfo-insmod-lsmod-and-rmmod-have-distinct-roles">5.1 <code>modinfo</code>, <code>insmod</code>, <code>lsmod</code>, and <code>rmmod</code> have distinct roles</a></li>
+<li><a href="#52-pr_info-writes-to-the-kernel-log-not-the-invoking-terminal">5.2 <code>pr_info()</code> writes to the kernel log, not the invoking terminal</a></li>
+<li><a href="#53-module-metadata-licensing-and-out-of-tree-taint">5.3 Module metadata, licensing, and out-of-tree taint</a></li>
+<li><a href="#54-build-success-alone-does-not-prove-load-live-state-or-removal">5.4 Build success alone does not prove load, live state, or removal</a></li>
+</ul></li>
+<li><a href="#6-module-parameters-load-time-values-and-sysfs-access">6. Module parameters: load-time values and sysfs access</a>
+<ul>
+<li><a href="#61-a-module-parameter-has-a-name-type-backing-object-and-permissions">6.1 A module parameter has a name, type, backing object, and permissions</a></li>
+<li><a href="#62-parameter-permissions-control-sysfs-exposure-and-access">6.2 Parameter permissions control sysfs exposure and access</a></li>
+<li><a href="#63-a-callback-table-stores-function-pointers-for-custom-parameter-behavior">6.3 A callback table stores function pointers for custom parameter behavior</a></li>
+<li><a href="#64-module_param_cb-connects-a-name-callbacks-and-data">6.4 <code>module_param_cb()</code> connects a name, callbacks, and data</a></li>
+</ul></li>
+<li><a href="#7-a-module-must-match-the-particular-kernel-build-that-loads-it">7. A module must match the particular kernel build that loads it</a>
+<ul>
+<li><a href="#71-matching-kernel-version-numbers-do-not-guarantee-compatibility">7.1 Matching kernel version numbers do not guarantee compatibility</a></li>
+<li><a href="#72-vermagic-checks-the-kernel-release-and-build-settings">7.2 <code>vermagic</code> checks the kernel release and build settings</a></li>
+<li><a href="#73-config_modversions-checks-per-symbol-type-crcs">7.3 <code>CONFIG_MODVERSIONS</code> checks per-symbol type CRCs</a></li>
+<li><a href="#74-dmesg-helps-explain-an-invalid-module-format-error">7.4 <code>dmesg</code> helps explain an <code>Invalid module format</code> error</a></li>
+</ul></li>
+<li><a href="#8-recorded-experiment-building-loading-and-removing-helloko">8. Recorded experiment: building, loading, and removing <code>hello.ko</code></a>
+<ul>
+<li><a href="#81-helloc-logs-initialization-and-cleanup">8.1 <code>hello.c</code> logs initialization and cleanup</a></li>
+<li><a href="#82-kbuild-output-records-compilation-and-linking-not-loading">8.2 Kbuild output records compilation and linking, not loading</a></li>
+<li><a href="#83-guest-logs-and-lsmod-show-load-live-state-and-cleanup">8.3 Guest logs and <code>lsmod</code> show load, live state, and cleanup</a></li>
+</ul></li>
+</ul>
+</nav>
+
+<h2 id="1-a-module-adds-code-and-data-but-it-is-not-a-process">1. A module adds code and data, but it is not a process</h2>
+<h3 id="11-a-loaded-module-becomes-part-of-the-running-kernel">1.1 A loaded module becomes part of the running kernel</h3>
+<p>A <strong>kernel module</strong> is a file containing code and data that the kernel can load when needed. The filename normally ends in <code>.ko</code>, meaning <strong>kernel object</strong>.</p>
+<p>When the guest kernel loads <code>hello.ko</code>, it places the module's instructions and data in kernel memory. When <code>hello_init()</code> runs, it runs as kernel code, not as an ordinary application. If the module accesses memory it should not, the failure can affect the whole guest kernel rather than just one application.</p>
+<p>Built-in code is included in the kernel before boot. A loadable module can be added after boot. Once loaded, both run as kernel code with the same privilege; the module is not isolated from the kernel:</p>
+<pre class="text"><code>built-in kernel code -&gt; linked into the kernel before boot
+loadable module      -&gt; linked separately and added after boot</code></pre>
+<p>A <strong>monolithic kernel</strong> runs core services and drivers together inside the privileged kernel. In a microkernel design, drivers may instead run outside the kernel as separate processes. Linux modules are loaded later, but they still run inside the kernel; loading them does not turn Linux into a microkernel.</p>
+<h3 id="12-a-module-has-no-pid-private-stack-or-userspace-heap">1.2 A module has no PID, private stack, or userspace heap</h3>
+<p>These terms must not be mixed:</p>
+<ul>
+<li>A <strong>program</strong> is executable code stored in a file.</li>
+<li>A <strong>process</strong> is a running program instance with resources such as open files and a userspace address space—the range of memory addresses that the process can use.</li>
+<li>A <strong>task or thread</strong> is an execution unit selected by the scheduler, the kernel component that chooses which task runs on a CPU. Linux represents each task with <code>struct task_struct</code>.</li>
+<li>A <strong>kernel thread</strong> is a schedulable task that performs kernel work without a normal userspace address space.</li>
+<li>A <strong>kernel module</strong> is loadable kernel code and data. It is not scheduled independently and has no PID (process identifier) of its own.</li>
+</ul>
+<p>The <code>.ko</code> file contains the module’s compiled instructions and data. It organizes them into <strong>sections</strong>—named groups of related content. The data sections include:</p>
+<ul>
+<li><code>.rodata</code>: read-only data;</li>
+<li><code>.data</code>: initialized writable data;</li>
+<li><code>.bss</code>: writable data that starts as zero.</li>
+</ul>
+<p>A <strong>stack</strong> holds temporary information while a function runs, such as return information and local variables. A module has no stack of its own because it is not a task. When a module function runs, it uses the kernel stack available to the task or interrupt path that called it.</p>
+<p>A module has no private heap like a userspace process. If it needs memory while running, it can ask the kernel to allocate some with <code>kmalloc()</code> and release it with <code>kfree()</code> when finished. This allocated memory is separate from the module’s <code>.data</code> and <code>.bss</code> sections.</p>
+<h3 id="13-module-functions-run-in-the-context-that-calls-them">1.3 Module functions run in the context that calls them</h3>
+<p>An <strong>execution context</strong> means the circumstances in which the CPU is currently executing kernel code. For this note, the important examples are:</p>
+<ul>
+<li><strong>process context</strong>: a userspace task entered the kernel, for example through a system call;</li>
+<li><strong>kernel-thread context</strong>: a kernel thread is performing work;</li>
+<li><strong>interrupt context</strong>: the kernel is responding to a hardware interrupt.</li>
+</ul>
+<p>A module remains passive until one of these paths calls its code:</p>
+<pre class="text"><code>userspace task -&gt; system call -----&gt; module callback
+kernel thread ---------------------&gt; module callback
+hardware interrupt ----------------&gt; module interrupt handler</code></pre>
+<p>A <strong>system call</strong> is a controlled request through which a userspace task enters the kernel for a service. This changes the CPU from user mode to kernel mode, but it does not necessarily cause a <strong>context switch</strong>, in which the scheduler stops one task and runs another. The same task can enter the kernel, run a module callback, and return to userspace.</p>
+<h2 id="2-module-experiments-run-in-a-separate-qemu-guest-kernel">2. Module experiments run in a separate QEMU guest kernel</h2>
+<h3 id="21-helloko-runs-in-the-guest-kernel-not-host-userspace">2.1 <code>hello.ko</code> runs in the guest kernel, not host userspace</h3>
+<p>The test environment used this hierarchy:</p>
+<pre class="text"><code>host operating system
+└── QEMU process
+    └── virtual hardware
+        └── guest Linux
+            ├── guest userspace: BusyBox shell and commands
+            └── guest kernel: hello.ko runs here</code></pre>
+<p><strong>QEMU</strong> is a host userspace program that provides virtual hardware. <strong>BusyBox</strong> is a compact collection of userspace commands inside the guest. Neither one is the module's execution environment: <code>hello.ko</code> runs in the guest kernel.</p>
+<p>A module crash therefore normally damages the disposable guest rather than the host kernel.</p>
+<h3 id="22-guest-setup-boot-files-debugging-symbols-and-file-sharing">2.2 Guest setup: boot files, debugging symbols, and file sharing</h3>
+<p>The environment contains several artifacts:</p>
+<ul>
+<li><code>bzImage</code>: the bootable guest-kernel image loaded by QEMU;</li>
+<li><code>vmlinux</code>: the linked kernel file used by a debugger to relate kernel addresses to function names and source lines;</li>
+<li><code>initramfs</code>: an archive that supplies the guest's initial root filesystem;</li>
+<li>BusyBox: the executable that supplies the guest shell and basic commands;</li>
+<li>9p virtfs: a file-sharing mechanism that makes a host directory visible inside the guest.</li>
+</ul>
+<p>The shared directory only makes <code>hello.ko</code> visible in the guest. It does not load the module. Loading begins when <code>insmod</code> makes a request to the guest kernel.</p>
+<h3 id="23-the-target-kernel-not-the-compilers-location-determines-compatibility">2.3 The target kernel, not the compiler's location, determines compatibility</h3>
+<p>The compiler ran on the Linux host, but the resulting module ran in the guest. Therefore the module had to be built against the <strong>guest kernel's prepared build directory</strong>.</p>
+<p>The <strong>kernel source tree</strong> contains the files used to build Linux. The <strong>configuration</strong> records choices for that build: a feature can be built in (<code>y</code>), built as a module (<code>m</code>), or left out. Preparing the build uses those choices to create the headers and other generated files an external module needs. The module therefore needs the prepared build for its target kernel, not just a source tree with the right version number.</p>
+<pre class="text"><code>kernel source tree + selected configuration
+    -&gt; preparation creates the kernel build directory
+       -&gt; KDIR selects this directory for the module build
+
+compiler runs on:  Linux host
+module runs in:    QEMU guest kernel</code></pre>
+<p>The build explicitly selected the prepared guest-kernel build directory:</p>
+<pre class="sh"><code>make KDIR=/home/ubuntu/lkmpg/devtools/.cache/kernel-build</code></pre>
+<p>Without that override, <code>/lib/modules/$(uname -r)/build</code> would describe the host kernel because <code>make</code> was running on the host. A module can compile successfully for that kernel and still be rejected by the guest because the loader checks target-build compatibility, as Section 7 explains.</p>
+<h2 id="3-kbuild-turns-helloc-into-a-loadable-helloko">3. Kbuild turns <code>hello.c</code> into a loadable <code>hello.ko</code></h2>
+<h3 id="31-headers-expose-interfaces-they-are-not-separately-linked-libraries">3.1 Headers expose interfaces; they are not separately linked libraries</h3>
+<p>An <strong>interface</strong> is an agreed way for one piece of code to use another. For example, <code>hello.c</code> uses <code>pr_info("Hello world!\n")</code> to request kernel logging. The kernel headers tell the compiler how to use <code>pr_info()</code>; the module does not contain the whole logging implementation.</p>
+<p>Before C is compiled, the <strong>preprocessor</strong> processes <code>#include</code> directives and expands macros. Headers provide declarations, types, and macros needed to use an interface. Here, <code>&lt;linux/printk.h&gt;</code> provides <code>pr_info</code> as a macro; the preprocessor expands its use in <code>hello.c</code> before compilation.</p>
+<p>For example:</p>
+<pre class="c"><code>#include &lt;linux/module.h&gt;
+#include &lt;linux/printk.h&gt;</code></pre>
+<p>An <strong>include path</strong> is a directory the preprocessor searches for headers. Kbuild supplies directories from the target kernel tree, so <code>#include &lt;linux/printk.h&gt;</code> finds that kernel's <code>include/linux/printk.h</code>.</p>
+<p>Including <code>&lt;linux/printk.h&gt;</code> makes the <code>pr_info</code> macro available; it does not copy the kernel’s logging implementation into <code>hello.ko</code>. The macro expands during the build, and the loaded module uses the kernel’s logging code when it runs.</p>
+<h3 id="32-elf-objects-carry-code-data-symbols-and-relocations">3.2 ELF objects carry code, data, symbols, and relocations</h3>
+<p>The build moves through three files:</p>
+<ul>
+<li><code>hello.c</code> is the C source you write.</li>
+<li><code>hello.o</code> is compiled code and data with some addresses still to resolve.</li>
+<li><code>hello.ko</code> is the loadable module Kbuild makes from <code>hello.o</code>, adding information the kernel needs to load it. The kernel fills in remaining addresses when the module loads.</li>
+</ul>
+<p><strong>ELF</strong> (Executable and Linkable Format) is the file format of both <code>hello.o</code> and <code>hello.ko</code>. It organizes their code, data, and names so build tools can find them. The <strong>linker</strong> combines the compiled pieces into <code>hello.ko</code>. Some addresses cannot be filled in until the kernel chooses where to place the module when it loads it.</p>
+<p><code>hello.o</code> contains four kinds of information:</p>
+<ol type="1">
+<li>machine instructions compiled from functions such as <code>hello_init()</code>;</li>
+<li>data such as the string <code>"Hello world!\n"</code>;</li>
+<li><strong>symbols</strong>: names recorded for functions or data;</li>
+<li><strong>relocations</strong>: records of places where an address must be filled in later.</li>
+</ol>
+<p>A symbol, an object, and a pointer are different:</p>
+<ul>
+<li>a <strong>symbol</strong> is a name recorded for code or data, such as <code>hello_init</code> in <code>hello.o</code>;</li>
+<li>a C <strong>object</strong> is a region of memory that holds data. <code>"Hello world!\n"</code> is a string literal stored as an array of characters;</li>
+<li>a <strong>pointer</strong> is an address value. In <code>pr_info("Hello world!\n")</code>, the characters are stored in memory, and the logging code uses their address to read them. The address is not the characters themselves.</li>
+</ul>
+<p>In <code>module_init(hello_init)</code>, the module must identify the function to run when it loads:</p>
+<ol type="1">
+<li><strong>Symbol resolution — which function?</strong> Match the name <code>hello_init</code> to its compiled function.</li>
+<li><strong>Relocation — fixing addresses:</strong> When the kernel loads <code>hello.ko</code>, it chooses where to place the module in memory and adjusts references that need its final addresses.</li>
+</ol>
+<pre class="text"><code>build time: Kbuild links hello.ko; its load-time address is not yet known
+load time:  kernel places the module in memory
+            -&gt; resolves any remaining references and applies relocations
+            -&gt; calls hello_init()</code></pre>
+<h3 id="33-kbuild-applies-kernel-rules-and-modpost-checks-module-information">3.3 Kbuild applies kernel rules, and modpost checks module information</h3>
+<p>An <strong>external module</strong> (or <strong>out-of-tree module</strong>) has source outside the kernel source tree, as <code>hello.c</code> does. <strong>Kbuild</strong> is the kernel's build system. For this module, the Makefile invokes Kbuild with <code>KDIR</code> set to the prepared guest-kernel build directory, so <code>hello.c</code> uses that kernel's headers, configuration, and module build rules instead of being compiled as a standalone C program.</p>
+<p><strong>Metadata</strong> describes the module rather than doing its main work; <code>MODULE_LICENSE("GPL")</code> in <code>hello.c</code> is an example. After <code>hello.o</code> is compiled and before <code>hello.ko</code> is linked, <strong>modpost</strong> checks references to kernel symbols and prepares information to include in <code>hello.ko</code>. If symbol versioning is enabled, modpost records the expected versions of kernel symbols used by <code>hello.ko</code>. When loading the module, the kernel compares these with its own versions and rejects a mismatch.</p>
+<pre class="text"><code>hello.c
+    -&gt; compiler and assembler create hello.o
+    -&gt; Kbuild and modpost process module information
+    -&gt; linker creates hello.ko</code></pre>
+<p>An <strong>exported symbol</strong> is a name for kernel code or data that other modules may use. <code>Module.symvers</code> is a build-time list of exported names and, when symbol versioning is enabled, their cyclic redundancy check (CRC) values. Kbuild records the relevant CRCs in <code>hello.ko</code>; when loading the module, the kernel compares them with its own. <code>Module.symvers</code> does not contain the function code or its memory address.</p>
+<h3 id="34-the-external-module-makefile-tells-target-kbuild-what-to-build">3.4 The external-module Makefile tells target Kbuild what to build</h3>
+<p>The module’s Makefile selects <code>hello.o</code> through <code>obj-m</code> and invokes the prepared target kernel’s Kbuild with <code>KDIR</code> and <code>M</code>. <code>KDIR</code> names the prepared kernel build; <code>M</code> names the external module directory. The <code>modules</code> and <code>clean</code> actions build and remove intermediate outputs. Makefile recipe lines begin with a tab.</p>
+<h3 id="35-kbuild-selects-built-in-or-module-output-and-combines-objects">3.5 Kbuild selects built-in or module output and combines objects</h3>
+<p><strong>In-tree code</strong> lives inside the kernel source tree. For such code, kernel configuration can select three outcomes:</p>
+<pre class="text"><code>CONFIG_FOO=y      -&gt; obj-y -&gt; include it in the kernel image
+CONFIG_FOO=m      -&gt; obj-m -&gt; build it as a module
+CONFIG_FOO unset  -&gt; do not build it</code></pre>
+<p>A one-file external module needs one module target:</p>
+<pre class="makefile"><code>obj-m += hello.o</code></pre>
+<p>A module split across multiple source files needs a final module name and a list of input objects:</p>
+<pre class="makefile"><code>obj-m += startstop.o
+startstop-objs := start.o stop.o</code></pre>
+<p>Here <code>start.o</code> and <code>stop.o</code> are linked together to produce <code>startstop.ko</code>.</p>
+<h2 id="4-initialization-makes-the-module-usable-cleanup-reverses-it">4. Initialization makes the module usable; cleanup reverses it</h2>
+<h3 id="41-module_init-and-module_exit-identify-lifecycle-callbacks">4.1 <code>module_init()</code> and <code>module_exit()</code> identify lifecycle callbacks</h3>
+<p>A <strong>callback</strong> is a function you write for other code to call later. In <code>hello.c</code>, you write <code>hello_init()</code> and <code>hello_exit()</code>, but you do not call them yourself. <code>module_init()</code> and <code>module_exit()</code> identify them as the functions to run when the kernel loads and unloads the module:</p>
+<pre class="c"><code>module_init(hello_init);
+module_exit(hello_exit);</code></pre>
+<ul>
+<li><code>hello_init()</code> is called while the module is being loaded;</li>
+<li><code>hello_exit()</code> is called when the kernel removes a successfully loaded module with <code>rmmod</code>. It is not called if <code>hello_init()</code> fails.</li>
+</ul>
+<p>The initialization function returns <code>int</code>:</p>
+<ul>
+<li><code>0</code> means initialization succeeded, so the module becomes <strong>live</strong>: loaded and available for use;</li>
+<li>a negative error value means initialization failed, so the module must not become live.</li>
+</ul>
+<p>The exit callback returns <code>void</code>, so it provides no success or failure value. The kernel decides whether removal can proceed before calling it.</p>
+<p>Older examples define functions literally named <code>init_module()</code> and <code>cleanup_module()</code>. Current code normally uses ordinary function names plus <code>module_init()</code> and <code>module_exit()</code>.</p>
+<p>The guide’s <a href="https://github.com/sysprog21/lkmpg/blob/5854698bc4535357d9c40d4eefa5241ef3bd814e/examples/hello-1.c">hello-1.c</a> uses the older fixed names; <a href="https://github.com/sysprog21/lkmpg/blob/5854698bc4535357d9c40d4eefa5241ef3bd814e/examples/hello-2.c">hello-2.c</a> uses ordinary callback names with <code>module_init()</code> and <code>module_exit()</code>. In the second example, file-scope <code>static</code> keeps those names local to its C file.</p>
+<h3 id="42-__init-and-__exit-describe-lifetime-not-which-callback-is-selected">4.2 <code>__init</code> and <code>__exit</code> describe lifetime, not which callback is selected</h3>
+<p>An <strong>annotation</strong> is an extra marker on a declaration. For example, <code>__init</code> in <code>static int __init hello_init(void)</code> marks the function as initialization code. It affects where that code is placed; <code>module_init(hello_init)</code> separately selects the function to run when the module loads:</p>
+<pre class="text"><code>Which function does the kernel call?
+module_init(hello_init) -&gt; hello_init at load time
+module_exit(hello_exit) -&gt; hello_exit at removal time
+
+Where does the build place code or data?
+__init     -&gt; function in the initialization section
+__initdata -&gt; data in the initialization section
+__exit     -&gt; function in the exit section</code></pre>
+<ul>
+<li><code>__init</code> code and <code>__initdata</code> are needed only during initialization. The kernel can reclaim their memory afterward; using reclaimed data is a lifetime bug.</li>
+<li><code>__exit</code> cleanup code stays available until a loadable module is removed. Built-in code cannot be unloaded, so its exit code is omitted from the kernel image.</li>
+</ul>
+<p>The guide’s <a href="https://github.com/sysprog21/lkmpg/blob/5854698bc4535357d9c40d4eefa5241ef3bd814e/examples/hello-3.c">hello-3.c</a> applies <code>__init</code>, <code>__initdata</code>, and <code>__exit</code> to a variable and two callbacks. Its file-scope <code>static</code> instead restricts their names to that C file.</p>
+<h3 id="43-file-scope-static-keeps-a-name-inside-one-c-source-file">4.3 File-scope <code>static</code> keeps a name inside one C source file</h3>
+<p>A <strong>translation unit</strong> is a <code>.c</code> file as the compiler sees it after preprocessing, including text from its headers. A name has <strong>file scope</strong> when it is declared outside any function, as <code>hello3_data</code> and the two callbacks are.</p>
+<p>At file scope, the C keyword <code>static</code> gives a function or object <strong>internal linkage</strong>. That means another translation unit cannot refer to the same entity by that name. The hello module uses:</p>
+<pre class="c"><code>static int __init hello_init(void)
+static void __exit hello_exit(void)</code></pre>
+<p><code>module_init()</code> and <code>module_exit()</code> refer to these callbacks in the same <code>.c</code> file. No other source file needs their names, so the functions can remain file-local.</p>
+<p>Inside a function, <code>static</code> applies to a local variable instead: its name stays inside that function, but its value persists between calls. A zero-initialized static variable usually goes in <code>.bss</code>; one initialized to a nonzero value usually goes in <code>.data</code>.</p>
+<p>Removing file-scope <code>static</code> allows another <code>.c</code> file in the same module to refer to the name if it has a declaration. It does not make the name available to other kernel modules; that requires exporting the symbol.</p>
+<h3 id="44-resources-need-cleanup-on-initialization-failure-and-removal">4.4 Resources need cleanup on initialization failure and removal</h3>
+<p>Use one example: a driver callback that needs a buffer in memory.</p>
+<ol type="1">
+<li><strong>Who does what?</strong> A <strong>driver</strong> handles device requests. A kernel <strong>subsystem</strong> routes requests to the driver’s registered functions, called <strong>callbacks</strong>. The buffer is a <strong>resource</strong> the driver owns.</li>
+<li><strong>Initialize:</strong> Get the buffer before registering the callback, because registration may let requests reach it.</li>
+<li><strong>Remove:</strong> Stop new requests, ensure callbacks already using the buffer have finished, then free it. Freeing it earlier could leave a callback using freed memory.</li>
+<li><strong>Initialization fails:</strong> If setup fails after getting the buffer, release it before returning the error. The exit callback will not run because the module never finished loading.</li>
+</ol>
+<h2 id="5-verifying-a-module-lifecycle-with-tools-and-kernel-logs">5. Verifying a module lifecycle with tools and kernel logs</h2>
+<h3 id="51-modinfo-insmod-lsmod-and-rmmod-have-distinct-roles">5.1 <code>modinfo</code>, <code>insmod</code>, <code>lsmod</code>, and <code>rmmod</code> have distinct roles</h3>
+<p>These tools answer different questions about a module:</p>
+<ol type="1">
+<li><strong>What metadata is in the file?</strong> <code>modinfo hello.ko</code> reads metadata stored in <code>hello.ko</code>; it does not load the module.</li>
+<li><strong>Can the kernel load it?</strong> <code>insmod path/hello.ko</code> asks the running kernel to load that file.</li>
+<li><strong>Is it loaded now?</strong> <code>lsmod</code> lists loaded modules using kernel-provided information from <code>/proc/modules</code>. Despite its location under <code>/proc</code>, that file lists modules, not processes.</li>
+<li><strong>Can it be removed?</strong> <code>rmmod hello</code> asks the kernel to unload the module named <code>hello</code>.</li>
+</ol>
+<p>The loaded module name can differ from its filename: <code>hello-1.ko</code>, for example, may appear as <code>hello_1</code>.</p>
+<h3 id="52-pr_info-writes-to-the-kernel-log-not-the-invoking-terminal">5.2 <code>pr_info()</code> writes to the kernel log, not the invoking terminal</h3>
+<p><code>pr_info()</code> creates a kernel log record. It does not behave like userspace <code>printf()</code> writing to the current terminal.</p>
+<pre class="text"><code>pr_info() -&gt; kernel log (ring buffer), not the terminal
+           -&gt; dmesg reads messages still in the buffer
+           -&gt; a running system journal may save them</code></pre>
+<p>The <strong>ring buffer</strong> has limited space: new messages eventually replace old ones. A callback that runs often should not log on every call.</p>
+<h3 id="53-module-metadata-licensing-and-out-of-tree-taint">5.3 Module metadata, licensing, and out-of-tree taint</h3>
+<p>Module metadata such as <code>MODULE_LICENSE</code>, <code>MODULE_AUTHOR</code>, and <code>MODULE_DESCRIPTION</code> describes a <code>.ko</code>. See the guide’s <a href="https://github.com/sysprog21/lkmpg/blob/5854698bc4535357d9c40d4eefa5241ef3bd814e/examples/hello-4.c">hello-4.c</a> for an example. <code>modinfo hello.ko</code> reads the module’s metadata without loading it. <code>MODULE_LICENSE("GPL")</code> also allows the module to use kernel symbols reserved for GPL-compatible modules; an absent or incompatible license can cause a separate license-related taint.</p>
+<p>A <strong>taint</strong> is a flag the kernel sets to record a condition that may matter when debugging; it does not mean the kernel is broken. In this run, <code>(O)</code> in <code>lsmod</code> and the <code>loading out-of-tree module taints kernel</code> message mean an out-of-tree module was loaded. This is separate from its GPL-compatible license.</p>
+<h3 id="54-build-success-alone-does-not-prove-load-live-state-or-removal">5.4 Build success alone does not prove load, live state, or removal</h3>
+<pre class="text"><code>Kbuild output
+    -&gt; proves hello.ko was produced for the selected build target
+
+successful insmod + initialization log
+    -&gt; proves the running kernel accepted it and called initialization
+
+lsmod row showing Live
+    -&gt; shows the module was live when observed, after initialization completed
+
+successful rmmod + cleanup log
+    -&gt; proves cleanup ran during removal</code></pre>
+<p><code>hello.c</code> shows the intended behavior, and the build shows that Kbuild produced <code>hello.ko</code>. Neither proves the guest ran it. The initialization log, <code>lsmod</code> row, and cleanup log provide evidence that the guest loaded, kept, and removed the module.</p>
+<h2 id="6-module-parameters-load-time-values-and-sysfs-access">6. Module parameters: load-time values and sysfs access</h2>
+<p>The minimal <code>hello.c</code> in the observed experiment has no parameters. The examples below explain the parameter model shown in the LKMPG source.</p>
+<h3 id="61-a-module-parameter-has-a-name-type-backing-object-and-permissions">6.1 A module parameter has a name, type, backing object, and permissions</h3>
+<p>In the module’s C source, <code>module_param()</code> is a macro, not a system call. It marks a variable as a setting the kernel may fill when loading the module. The <code>insmod</code> program makes the module-loading system call and passes any supplied setting, such as <code>myint=7</code>, to the kernel:</p>
+<pre class="c"><code>static int myint = 420;
+module_param(myint, int, 0644);</code></pre>
+<p>The terms mean:</p>
+<ul>
+<li><strong>backing object</strong>: the C object, here <code>myint</code>, that actually stores the value;</li>
+<li><strong>parameter name</strong>: the name accepted in text such as <code>myint=7</code>;</li>
+<li><strong>type</strong>: the rule for converting the text to a C value, here <code>int</code>;</li>
+<li><strong>permissions</strong>: <code>0644</code> exposes <code>myint</code> under <code>/sys</code> (sysfs, a kernel-provided view of live settings). After loading, the file’s owner can read or change it; others can read it. This is separate from passing <code>myint=7</code> to <code>insmod</code>.</li>
+</ul>
+<p>During loading:</p>
+<pre class="text"><code>insmod example.ko myint=7
+    -&gt; find parameter metadata for &quot;myint&quot;
+    -&gt; parse &quot;7&quot; as int
+    -&gt; store 7 in the backing object
+    -&gt; call module initialization</code></pre>
+<p>If you load the module without <code>myint=...</code>, <code>myint</code> keeps its initial value of <code>420</code>. If you pass a value that is not an integer, such as <code>myint=abc</code>, the kernel rejects the load before calling the initialization function.</p>
+<p><code>module_param_array()</code> lets a module accept several values in an array and can record how many were supplied. <code>MODULE_PARM_DESC()</code> adds a description that <code>modinfo</code> can display.</p>
+<p>The guide’s <a href="https://github.com/sysprog21/lkmpg/blob/5854698bc4535357d9c40d4eefa5241ef3bd814e/examples/hello-5.c">hello-5.c</a> shows scalar, string, and array parameter declarations. That example was not part of the recorded guest run.</p>
+<h3 id="62-parameter-permissions-control-sysfs-exposure-and-access">6.2 Parameter permissions control sysfs exposure and access</h3>
+<p><strong>sysfs</strong> is a <strong>virtual filesystem</strong> usually mounted at <code>/sys</code>. It is called virtual because its entries look like files and directories, but represent live kernel state rather than ordinary files stored on disk. The kernel supplies their contents when they are read.</p>
+<p>A parameter permission of <code>0</code> allows a load-time assignment but creates no sysfs parameter file. A nonzero mode such as <code>0644</code> creates an attribute that its owner may read and write and other users may read. It appears under:</p>
+<pre class="text"><code>/sys/module/&lt;module-name&gt;/parameters/&lt;parameter-name&gt;</code></pre>
+<p>That file is not an independent disk copy. Reading or writing it accesses the live parameter interface connected to the backing object.</p>
+<h3 id="63-a-callback-table-stores-function-pointers-for-custom-parameter-behavior">6.3 A callback table stores function pointers for custom parameter behavior</h3>
+<p>A <strong>function pointer</strong> holds a function’s address so other code can call it later. A C <strong>structure</strong> groups named fields. Here, <code>struct kernel_param_ops</code> groups two function-pointer fields, <code>.set</code> and <code>.get</code>; an instance of it is an <strong>operations table</strong>.</p>
+<pre class="c"><code>static const struct kernel_param_ops watched_ops = {
+    .set = watched_set,
+    .get = watched_get,
+};</code></pre>
+<p>Read the example as follows:</p>
+<ol type="1">
+<li><code>struct kernel_param_ops</code> defines the table’s fields; <code>watched_ops</code> is the table object being created.</li>
+<li><code>.set = watched_set</code> stores the address of the function used to set the parameter.</li>
+<li><code>.get = watched_get</code> stores the address of the function used to read the parameter.</li>
+<li><code>static</code> keeps the table’s name in this C file; <code>const</code> prevents changing the table after it is created.</li>
+</ol>
+<p>This code stores function addresses; it does not call the functions. The kernel calls them later when the parameter is set or read.</p>
+<h3 id="64-module_param_cb-connects-a-name-callbacks-and-data">6.4 <code>module_param_cb()</code> connects a name, callbacks, and data</h3>
+<pre class="c"><code>module_param_cb(watched, &amp;watched_ops, &amp;watched, 0644);</code></pre>
+<p>In C, <code>&amp;</code> means “address of.” The two uses of <code>watched</code> below have different roles:</p>
+<ol type="1">
+<li><code>watched</code> names the parameter a user can set.</li>
+<li><code>&amp;watched_ops</code> gives the address of the operations table holding the set/get callback pointers.</li>
+<li><code>&amp;watched</code> gives the address of the integer variable that stores its value.</li>
+<li><code>0644</code> sets permissions for its sysfs file after loading.</li>
+</ol>
+<p>At build time, <code>module_param_cb()</code> creates a <code>struct kernel_param</code> parameter record in the module’s <code>__param</code> section. The linker carries that parameter record into the <code>.ko</code>. It connects the parameter name <code>watched</code> to the separate <code>watched</code> variable and the <code>watched_ops</code> set/get callbacks; creating it does not call them.</p>
+<pre class="text"><code>Module is built
+    module_param_cb(...)
+        -&gt; creates a parameter record in __param:
+             name: &quot;watched&quot;
+             callbacks: watched_ops
+             value location: watched
+
+Module loads with watched=7
+    kernel finds the parameter record for &quot;watched&quot;
+        -&gt; uses watched_ops.set to call watched_set(&quot;7&quot;, kp), passing the parameter record as kp
+             param_set_int(&quot;7&quot;, kp) follows the parameter record&#39;s value address
+                 -&gt; stores 7 in the watched variable
+             ret == 0, so watched_set logs &quot;watched updated to 7&quot;
+        -&gt; calls hello_6_init()
+             log &quot;watched starts at 7&quot;
+
+Someone reads the parameter through sysfs
+    kernel uses watched_ops.get to call watched_get(buffer, kp), passing the same parameter record as kp
+        -&gt; param_get_int(buffer, kp) follows the parameter record&#39;s value address
+             -&gt; reads watched and writes &quot;7&quot; into buffer
+        -&gt; if ret &gt;= 0, watched_get logs &quot;watched was read&quot;
+
+Module is removed
+    kernel calls hello_6_exit()
+        -&gt; log &quot;Goodbye, world 6&quot;</code></pre>
+<p>The kernel supplies <code>kp</code> when it calls either callback. <code>val</code> receives incoming text in the setter; <code>buffer</code> receives outgoing text in the getter. Neither callback runs when <code>module_param_cb()</code> appears in the source.</p>
+<p>The guide’s <a href="https://github.com/sysprog21/lkmpg/blob/5854698bc4535357d9c40d4eefa5241ef3bd814e/examples/hello-6.c">hello-6.c</a> joins custom set/get callbacks to one parameter.</p>
+<p>If this LKMPG example were built for the guest as <code>hello-6.ko</code>, these guest commands would set <code>watched</code> to <code>7</code> and show its log messages:</p>
+<pre class="sh"><code>insmod /path/to/hello-6.ko watched=7
+dmesg | tail</code></pre>
+<p>Expected relevant log lines:</p>
+<pre class="text"><code>watched updated to 7
+Hello, world 6
+watched starts at 7</code></pre>
+<p>The set callback logs first, before <code>hello_6_init()</code> logs the starting value.</p>
+<h2 id="7-a-module-must-match-the-particular-kernel-build-that-loads-it">7. A module must match the particular kernel build that loads it</h2>
+<p>The module was built using the guest kernel’s prepared build directory, and that guest successfully loaded it. This shows <code>hello.ko</code> was compatible with that guest kernel.</p>
+<h3 id="71-matching-kernel-version-numbers-do-not-guarantee-compatibility">7.1 Matching kernel version numbers do not guarantee compatibility</h3>
+<p>A version number such as <code>6.12.6</code> is only a label. Two kernels with that number can have different build settings or interfaces. A module built for one may not load into the other.</p>
+<p>A successful compile shows that <code>hello.ko</code> was built against the kernel files selected by <code>KDIR</code>; it does not show that another running kernel will accept it. <strong>Compatibility</strong> means the assumptions used to build the module match the running kernel. For example, if a module expects a structure field at byte 8 but the kernel places it at byte 16, the module could read the wrong data.</p>
+<h3 id="72-vermagic-checks-the-kernel-release-and-build-settings">7.2 <code>vermagic</code> checks the kernel release and build settings</h3>
+<p>A <code>.ko</code> contains a <strong>version magic</strong> (<code>vermagic</code>) string: the kernel release plus other build properties. For example, these commands run in the guest could show:</p>
+<pre class="text"><code>$ modinfo -F vermagic hello.ko
+6.12.6 ...other build properties...
+$ uname -r
+6.12.6</code></pre>
+<p><code>6.12.6</code> is only the kernel version number; vermagic also records build settings. When loading the module, the kernel checks the relevant details against its own build. If they differ, it may reject the module with <code>Invalid module format</code>. If they match, this one check passes, but other checks can still prevent loading.</p>
+<h3 id="73-config_modversions-checks-per-symbol-type-crcs">7.3 <code>CONFIG_MODVERSIONS</code> checks per-symbol type CRCs</h3>
+<p>With <code>CONFIG_MODVERSIONS=y</code>, exported symbols have CRCs derived from their declared types—for a function, this includes its argument and return types. A symbol with such a CRC is called <strong>versioned</strong>; the CRC is not a kernel release number or a memory address. The target kernel’s <code>Module.symvers</code> lists these CRCs. When building a module, Kbuild records the relevant CRCs in its <code>.ko</code>, not the <code>Module.symvers</code> file itself. At load time, the running kernel compares the recorded CRCs with its own.</p>
+<p>For example, suppose a module uses a hypothetical exported function <code>device_read</code>:</p>
+<pre class="text"><code>module expects:        device_read CRC 0xA1
+running kernel has:    device_read CRC 0xB2
+result:                mismatch -&gt; reject the module</code></pre>
+<p>The kernel checks CRCs for exported symbols the module uses, one symbol at a time. A matching CRC passes that symbol’s check. This check is separate from vermagic; passing both does not guarantee the module will load.</p>
+<p><code>module_layout</code> is a special symbol associated with the kernel’s module data layout, including <code>struct module</code>. The <code>.ko</code> carries an expected CRC for this <strong>symbol</strong>, not a CRC of the whole module file. At load time, the kernel compares it with its own <code>module_layout</code> CRC. “Disagrees about version of symbol module_layout” means those two CRCs differ; it is not a vermagic mismatch.</p>
+<h3 id="74-dmesg-helps-explain-an-invalid-module-format-error">7.4 <code>dmesg</code> helps explain an <code>Invalid module format</code> error</h3>
+<p>If <code>insmod</code> reports <code>Invalid module format</code>, that message alone does not identify the cause:</p>
+<ol type="1">
+<li>Read the guest kernel log with <code>dmesg</code> for the specific loader message.</li>
+<li>Inspect the <code>.ko</code> with <code>modinfo</code> and check which <code>KDIR</code> was used to build it.</li>
+<li>Use the log message to distinguish a vermagic mismatch from a symbol CRC mismatch.</li>
+<li>If the module was built for the wrong kernel, rebuild it against the running guest kernel’s prepared build directory.</li>
+</ol>
+<p>Some module tools offer force options that bypass selected checks. Do not use them to insert a mismatched module: bypassing a check does not make the module compatible.</p>
+<h2 id="8-recorded-experiment-building-loading-and-removing-helloko">8. Recorded experiment: building, loading, and removing <code>hello.ko</code></h2>
+<h3 id="81-helloc-logs-initialization-and-cleanup">8.1 <code>hello.c</code> logs initialization and cleanup</h3>
+<p>The observed experiment’s <code>hello.c</code> designates two callbacks with observable log messages:</p>
+<pre class="c"><code>static int __init hello_init(void)
+{
+    pr_info(&quot;Hello world!\n&quot;);
+    return 0;
+}
+
+static void __exit hello_exit(void)
+{
+    pr_info(&quot;Bye world!\n&quot;);
+}
+
+module_init(hello_init);
+module_exit(hello_exit);</code></pre>
+<p>On load, <code>hello_init()</code> logs “Hello world!”; on removal, <code>hello_exit()</code> logs “Bye world!”.</p>
+<h3 id="82-kbuild-output-records-compilation-and-linking-not-loading">8.2 Kbuild output records compilation and linking, not loading</h3>
+<p>The Linux host ran these commands to build a module for the QEMU guest. <code>KDIR</code> points to the guest kernel’s prepared build files:</p>
+<pre class="sh"><code>make clean KDIR=/home/ubuntu/lkmpg/devtools/.cache/kernel-build
+make KDIR=/home/ubuntu/lkmpg/devtools/.cache/kernel-build</code></pre>
+<p>The second command’s build output included these stages:</p>
+<pre class="text"><code>CC [M]   hello.o
+MODPOST  Module.symvers
+CC [M]   hello.mod.o
+CC [M]   .module-common.o
+LD [M]   hello.ko</code></pre>
+<pre class="text"><code>Your source: hello.c
+    -&gt; CC [M] compiles it into hello.o
+    -&gt; MODPOST checks module information and writes Module.symvers
+    -&gt; CC [M] compiles two Kbuild-generated pieces
+    -&gt; LD [M] links the compiled pieces into hello.ko on disk
+
+Later: insmod asks the guest kernel to load hello.ko</code></pre>
+<p>These are progress labels printed by the kernel build system (Kbuild), not commands you typed. <code>CC</code> means compile, <code>LD</code> means link, and <code>[M]</code> marks work on a module. The <code>.o</code> files are compiled object files; <code>.ko</code> is the resulting kernel-module file. Read each line in order:</p>
+<ol type="1">
+<li><code>CC [M] hello.o</code>: compile <code>hello.c</code> into <code>hello.o</code>.</li>
+<li><code>MODPOST Module.symvers</code>: check module and exported-symbol information; <code>Module.symvers</code> is a build-time symbol list, not code linked into <code>hello.ko</code>.</li>
+<li><code>CC [M] hello.mod.o</code>: compile module information generated by Kbuild.</li>
+<li><code>CC [M] .module-common.o</code>: compile another Kbuild-generated piece; this is not another source file you wrote.</li>
+<li><code>LD [M] hello.ko</code>: link the compiled pieces into <code>hello.ko</code>. <code>LD</code> does <strong>not</strong> mean the kernel loaded the module.</li>
+</ol>
+<p>The build produced a file on disk; the guest's separate <code>insmod</code> step shows whether it loaded.</p>
+<h3 id="83-guest-logs-and-lsmod-show-load-live-state-and-cleanup">8.3 Guest logs and <code>lsmod</code> show load, live state, and cleanup</h3>
+<p>The guest reported Linux <code>6.12.6</code>. The recorded guest run can be read in three steps:</p>
+<ol type="1">
+<li><code>insmod /mnt/lkmpg/module-lifecycle/hello.ko</code> requested a load. The kernel log then showed <code>Hello world!</code>, matching <code>hello_init()</code>.</li>
+<li><code>lsmod | grep '^hello'</code> showed <code>hello ... Live ... (O)</code>. The module remained loaded after initialization; <code>(O)</code> identifies it as out-of-tree.</li>
+<li><code>rmmod hello</code> requested removal. The kernel log then showed <code>Bye world!</code>, matching <code>hello_exit()</code>.</li>
+</ol>
+<p>The out-of-tree taint warning came from the kernel, not <code>hello.c</code>.</p>
+<aside class="reference-box" aria-labelledby="reference-label">
+
+<p class="reference-label" id="reference-label"><strong>Reference</strong></p>
+
+<p>This note is based on Chapters 1–4 of <a href="https://sysprog21.github.io/lkmpg/">The Linux Kernel Module Programming Guide (LKMPG)</a>. The explanations are study synthesis; linked LKMPG examples belong to the guide’s contributors.</p>
+</aside>
+
+  </main>
+  <footer><div class="wrap">© 2026 Jack Byun</div></footer>
+</body>
+</html>
