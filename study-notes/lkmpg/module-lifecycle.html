@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Kernel module lifecycle: build, load, observation, and removal in a QEMU guest.">
-  <title>Kernel Module Lifecycle — LKMPG — Jack Byun</title>
+  <title>Kernel Module Lifecycle — Linux Kernel Module Programming — Jack Byun</title>
   <link rel="stylesheet" href="../../style.css">
 </head>
 <body>
@@ -14,7 +14,7 @@
     <nav aria-label="Main navigation"><a href="../">Study Notes</a> <a href="../../projects/">Projects</a> <a href="../../contributions/">Upstream Contributions</a></nav>
   </div></header>
   <main class="wrap article" id="content">
-    <p class="breadcrumbs"><a href="../">Study Notes</a> / <a href="./">LKMPG</a></p>
+    <p class="breadcrumbs"><a href="../">Study Notes</a> / <a href="./">Linux Kernel Module Programming</a></p>
 <h1 id="kernel-module-lifecycle">Kernel Module Lifecycle</h1>
     <p class="article-dates">Created <time datetime="2026-09-29">29 September 2026</time> · Last edited <time datetime="2026-09-29">29 September 2026</time></p>
 <p>This note explains where Linux kernel modules run, how Kbuild turns source into a loadable module, and how initialization and cleanup define its lifecycle. It also covers module parameters, kernel-build compatibility, and the tools and logs used to verify loading and removal in a QEMU guest.</p>
