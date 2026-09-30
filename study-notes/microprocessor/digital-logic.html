@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Digital logic fundamentals: combinational gates and routing, clocked flip-flops, and multi-bit registers.">
+  <title>Combinational and Sequential Digital Logic — Microprocessor — Jack Byun</title>
+  <link rel="stylesheet" href="../../style.css?v=20260930-layout">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="site-header"><div class="wrap">
+    <a class="brand" href="../../">Jack Byun</a>
+    <nav aria-label="Main navigation"><a href="../">Study Notes</a> <a href="../../projects/">Projects</a> <a href="../../contributions/">Upstream Contributions</a></nav>
+  </div></header>
+  <main class="wrap article" id="content">
+    <p class="breadcrumbs"><a href="../">Study Notes</a> / <a href="./">Microprocessor</a></p>
+<h1 id="1-combinational-and-sequential-digital-logic">1. Combinational and Sequential Digital Logic</h1>
+<p class="article-dates">Created <time datetime="2026-09-30">30 September 2026</time> · Last edited <time datetime="2026-09-30">30 September 2026</time></p>
+<p>Digital logic provides fundamental building blocks for modern microprocessors. It is commonly divided into <strong>combinational logic</strong> and <strong>sequential logic</strong>. Combinational circuits produce outputs from their current inputs without storing state; gates, muxes, and demuxes are examples. Sequential circuits store state, so their outputs depend on both current inputs and previously stored values. Flip-flops and registers are examples: they normally update on clock edges, though an asynchronous reset can change stored bits without a clock edge.</p>
+<nav class="toc-box" aria-labelledby="table-of-contents">
+<h2 id="table-of-contents">Table of contents</h2>
+<ul>
+<li><a href="#1-combinational-logic-uses-current-inputs">1. Combinational logic uses current inputs</a>
+<ul>
+<li><a href="#11-logic-gates-perform-boolean-operations">1.1 Logic gates perform Boolean operations</a></li>
+<li><a href="#12-multiplexers-select-one-data-input">1.2 Multiplexers select one data input</a></li>
+<li><a href="#13-demultiplexers-route-data-to-one-output">1.3 Demultiplexers route data to one output</a></li>
+</ul></li>
+<li><a href="#2-sequential-logic-stores-state-over-time">2. Sequential logic stores state over time</a>
+<ul>
+<li><a href="#21-flip-flops-store-one-bit">2.1 Flip-flops store one bit</a></li>
+<li><a href="#22-registers-store-multiple-bits">2.2 Registers store multiple bits</a></li>
+</ul></li>
+</ul>
+</nav>
+<h2 id="1-combinational-logic-uses-current-inputs">1. Combinational logic uses current inputs</h2>
+<h3 id="11-logic-gates-perform-boolean-operations">1.1 Logic gates perform Boolean operations</h3>
+<p>These operators act on single bits:</p>
+<div class="table-scroll" role="region" tabindex="0" aria-label="Logic gate truth table">
+<table>
+<thead>
+<tr>
+<th>Gate</th>
+<th>Expression</th>
+<th>Output is 1 when…</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NOT</td>
+<td><code>~a</code></td>
+<td><code>a</code> is 0</td>
+</tr>
+<tr>
+<td>AND</td>
+<td><code>a &amp; b</code></td>
+<td>Both inputs are 1</td>
+</tr>
+<tr>
+<td>OR</td>
+<td><code>a | b</code></td>
+<td>Either or both inputs are 1</td>
+</tr>
+<tr>
+<td>XOR</td>
+<td><code>a ^ b</code></td>
+<td>Inputs differ</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h3 id="12-multiplexers-select-one-data-input">1.2 Multiplexers select one data input</h3>
+<p>A <strong>multiplexer (mux)</strong> passes one selected input to its output; it stores nothing. A two-input example is <code>y = (~s &amp; a) | (s &amp; b)</code>: select 0 passes <code>a</code>, select 1 passes <code>b</code>.</p>
+<pre role="region" tabindex="0" aria-label="Enabled four-to-one multiplexer" class="text"><code>                   E
+                   |
+                   v
+             +-----------+
+    a ------&gt;|0          |
+    b ------&gt;|1          |
+    c ------&gt;|2         y|------&gt; y
+    d ------&gt;|3          |
+             |           |
+             |     S     |
+             +-----------+
+                   ^
+                   |
+                s1 s0
+               (2 bits)</code></pre>
+<p>The two select bits choose which input to copy to <code>y</code>: <code>s1 s0 = 00</code> chooses <code>a</code>, <code>01</code> chooses <code>b</code>, <code>10</code> chooses <code>c</code>, and <code>11</code> chooses <code>d</code>. <code>E</code> is an active-high enable: the mux works when <code>E = 1</code>, so <code>y</code> copies the selected input. When <code>E = 0</code>, the mux is disabled and <code>y = 0</code>, regardless of the select bits or input values. To build this 4-to-1 mux from gates, two NOT gates produce <code>~s1</code> and <code>~s0</code>; four AND gates each check one select pattern and <code>E</code>, and an OR gate combines their outputs:</p>
+<pre role="region" tabindex="0" aria-label="Multiplexer gate circuit" class="text"><code>     s1  s0                 E
+      |   |                 |
+      *---|--[NOT]--+       |
+      |   |         |~s1    |
+      |   *--[NOT]--|---+   |
+      |   |         |   |~s0|
+      |   |         |   |   |   +-----+
+a ----|---|---------|---|---|--&gt;|     |     +-----+
+      |   |         *---|---|--&gt;| AND |----&gt;|     |
+      |   |         |   *---|--&gt;|     |     |     |
+      |   |         |   |   *--&gt;|     |     |     |
+      |   |         |   |   |   +-----+     |     |
+      |   |         |   |   |               |     |
+      |   |         |   |   |   +-----+     |     |
+b ----|---|---------|---|---|--&gt;|     |     |     |
+      |   |         *---|---|--&gt;| AND |----&gt;|     |
+      |   *-------------|---|--&gt;|     |     |     |
+      |   |             |   *--&gt;|     |     |     |
+      |   |             |   |   +-----+     | OR  |-----&gt; y
+      |   |             |   |               |     |
+      |   |             |   |   +-----+     |     |
+c ----|---|-------------|---|--&gt;|     |     |     |
+      *---|-------------|---|--&gt;| AND |----&gt;|     |
+      |   |             *---|--&gt;|     |     |     |
+      |   |                 *--&gt;|     |     |     |
+      |   |                 |   +-----+     |     |
+      |   |                 |               |     |
+      |   |                 |   +-----+     |     |
+d ----|---|-----------------|--&gt;|     |     |     |
+      *---|-----------------|--&gt;| AND |----&gt;|     |
+          *-----------------|--&gt;|     |     +-----+
+                            *--&gt;|     |
+                                +-----+</code></pre>
+<p>In the drawing, <code>*</code> means two wires are connected; wires that merely cross without <code>*</code> are not. For example, when <code>s1 s0 = 01</code> and <code>E = 1</code>, only the <code>b</code> gate has all its select and enable inputs equal to 1, so its output equals <code>b</code>. The other three AND outputs are 0; the OR gate therefore makes <code>y = b</code>. If <code>b = 0</code>, then <code>y = 0</code> too. When <code>E = 0</code>, every AND gate receives a 0 from <code>E</code>, so <code>y = 0</code> for any selection.</p>
+<h3 id="13-demultiplexers-route-data-to-one-output">1.3 Demultiplexers route data to one output</h3>
+<p>A <strong>demultiplexer (demux)</strong> takes one input, <code>y</code>, and sends its value to just one of four outputs (<code>a</code>, <code>b</code>, <code>c</code>, or <code>d</code>). The select bits choose the destination. Every output not selected stays at 0. For example, if <code>s1 s0 = 01</code>, then <code>b = y</code> and <code>a = c = d = 0</code>; if <code>y = 0</code>, all four outputs are 0.</p>
+<pre role="region" tabindex="0" aria-label="One-to-four demultiplexer" class="text"><code>             +-----------+
+             |          0|------&gt; a
+    y ------&gt;|          1|------&gt; b
+             |          2|------&gt; c
+             |          3|------&gt; d
+             |           |
+             |     S     |
+             +-----------+
+                   ^
+                   |
+                s1 s0
+               (2 bits)</code></pre>
+<p>The select bits choose the output that copies <code>y</code>: <code>00</code> chooses <code>a</code>, <code>01</code> chooses <code>b</code>, <code>10</code> chooses <code>c</code>, and <code>11</code> chooses <code>d</code>. The other three outputs stay at 0. In the gate drawing below, the two NOT gates make <code>~s1</code> and <code>~s0</code> (the opposites of <code>s1</code> and <code>s0</code>). Each AND gate receives <code>y</code> plus the select signals for one choice. For example, the <code>b</code> gate computes <code>y AND ~s1 AND s0</code>: when <code>s1 s0 = 01</code>, that becomes <code>y AND 1 AND 1 = y</code>.</p>
+<pre role="region" tabindex="0" aria-label="Demultiplexer gate circuit" class="text"><code>     s1  s0                 y
+      |   |                 |
+      *---|--[NOT]--+       |
+      |   |         |~s1    |
+      |   *--[NOT]--|---+   |
+      |   |         |   |~s0|
+      |   |         |   |   |   +-----+
+      |   |         *---|---|--&gt;|     |
+      |   |         |   *---|--&gt;| AND |----&gt; a
+      |   |         |   |   *--&gt;|     |
+      |   |         |   |   |   +-----+
+      |   |         |   |   |
+      |   |         |   |   |   +-----+
+      |   |         *---|---|--&gt;|     |
+      |   *-------------|---|--&gt;| AND |----&gt; b
+      |   |             |   *--&gt;|     |
+      |   |             |   |   +-----+
+      |   |             |   |
+      |   |             |   |   +-----+
+      *---|-------------|---|--&gt;|     |
+      |   |             *---|--&gt;| AND |----&gt; c
+      |   |                 *--&gt;|     |
+      |   |                 |   +-----+
+      |   |                 |
+      |   |                 |   +-----+
+      *---|-----------------|--&gt;|     |
+          *-----------------|--&gt;| AND |----&gt; d
+                            *--&gt;|     |
+                                +-----+</code></pre>
+<p>Unlike the mux, the demux has four separate outputs, so there is no OR gate combining them. For example, when <code>s1 s0 = 01</code>, <code>b</code> copies <code>y</code> while <code>a</code>, <code>c</code>, and <code>d</code> are 0. If <code>y = 0</code>, then <code>b</code> is also 0—all four outputs are 0.</p>
+<h2 id="2-sequential-logic-stores-state-over-time">2. Sequential logic stores state over time</h2>
+<h3 id="21-flip-flops-store-one-bit">2.1 Flip-flops store one bit</h3>
+<p>Each <strong>D flip-flop</strong> stores one bit. When <code>clk</code> changes from 0 to 1 (a rising edge), it copies its <code>D</code> input to its <code>Q</code> output. Between rising edges, <code>Q</code> keeps its previous value. These two flip-flops have no enable (<code>E</code>) input.</p>
+<p>A signal is <strong>active-high</strong> if <code>1</code> turns it on, and <strong>active-low</strong> if <code>0</code> turns it on. The small circle and the name <code>resetn</code> mean this reset is active-low: <code>resetn = 0</code> clears both flip-flops to <code>Q0 Q1 = 00</code>; <code>resetn = 1</code> allows normal operation. In the conventional flip-flop symbol used here, the separate top reset pin denotes a direct <strong>asynchronous clear</strong>: asserting <code>resetn = 0</code> clears the outputs without waiting for a clock edge. The circle itself tells us only the active-low polarity.</p>
+<pre role="region" tabindex="0" aria-label="Two-flip-flop counter" class="text"><code>                +----------------------------------------------+
+                |                                              |
+ resetn --------|-------------------*--------------+           |
+                |                   |              o           |
+                |                   |       +-------------+    |
+                *---[NOT]o----------|------&gt;| D         Q |----*---&gt; Q0
+                |                   |       |             |
+                |                   |   +--&gt;|&gt;    FF0     |
+                |                   |   |   +-------------+
+                |                   +---|----------+
+                |                       |          o
+                |     +-------+         |   +-------------+
+                +----&gt;|       |         |   |             |
+                      |  XOR  |---------|--&gt;| D         Q |----*---&gt; Q1
+                +----&gt;|       |         |   |             |    |
+                |     +-------+         *--&gt;|&gt;    FF1     |    |
+                |                       |   +-------------+    |
+ clk -----------|-----------------------+                      |
+                |                                              |
+                +----------------------------------------------+</code></pre>
+<p><code>Q0</code> feeds the NOT gate and one XOR input; <code>Q1</code> feeds the other XOR input. These wires loop back to determine the next stored values.</p>
+<p><code>Q0</code> flips on every rising clock edge because its next value is <code>D0 = ~Q0</code>. <code>Q1</code> gets <code>D1 = Q1 ^ Q0</code>, where <code>^</code> means XOR. If the <strong>old</strong> <code>Q0</code> is 0, <code>Q1 ^ 0 = Q1</code>, so <code>Q1</code> stays the same. If the old <code>Q0</code> is 1, <code>Q1 ^ 1 = ~Q1</code>, so <code>Q1</code> flips. Both flip-flops use their old outputs at the same clock edge; neither uses the other flip-flop’s new value. For example, from <code>Q1 Q0 = 01</code>, the next <code>Q1</code> is <code>0 ^ 1 = 1</code> and the next <code>Q0</code> is <code>~1 = 0</code>, so the new state is <code>10</code>.</p>
+<div class="table-scroll" role="region" tabindex="0" aria-label="Two-bit counter state transitions">
+<table>
+<thead>
+<tr>
+<th>Old <code>Q1 Q0</code></th>
+<th>New <code>Q1 Q0</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>00</code></td>
+<td><code>01</code></td>
+</tr>
+<tr>
+<td><code>01</code></td>
+<td><code>10</code></td>
+</tr>
+<tr>
+<td><code>10</code></td>
+<td><code>11</code></td>
+</tr>
+<tr>
+<td><code>11</code></td>
+<td><code>00</code></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Starting from reset (<code>00</code>), the states repeat <code>00 -&gt; 01 -&gt; 10 -&gt; 11 -&gt; 00</code>. The two stored bits count from 0 to 3 and then return to 0 (<strong>modulo 4</strong>). For <strong>both</strong> flip-flops, <code>D</code> determines <strong>what bit to store next</strong>, while the shared <code>clk</code> determines <strong>when to store it</strong>: <code>D0 = ~Q0</code> and <code>D1 = Q1 ^ Q0</code>. With reset inactive, changing an input to <code>D</code> does not immediately change its stored <code>Q</code>. For example, the first clock edge changes <code>Q1 Q0</code> from <code>00</code> to <code>01</code>. That new <code>Q0 = 1</code> changes the value waiting at <code>Q1</code>’s <code>D</code> input, but <code>Q1</code> remains 0 until the next rising edge, when the state becomes <code>10</code>. Both flip-flops use the same clock, so the counter is <strong>synchronous</strong>.</p>
+<h3 id="22-registers-store-multiple-bits">2.2 Registers store multiple bits</h3>
+<p>A <strong>register</strong> stores several bits together—here, <code>Q3 Q2 Q1 Q0</code>. A mux before each flip-flop selects the data it will store. With reset inactive, the register acts on <strong>each rising edge of <code>clk</code></strong>:</p>
+<ul>
+<li><strong>Load (<code>E = 1</code>, <code>s_l = 1</code>):</strong> copy <code>D3 D2 D1 D0</code> into <code>Q3 Q2 Q1 Q0</code> together.</li>
+<li><strong>Shift (<code>E = 1</code>, <code>s_l = 0</code>):</strong> put <code>din</code> into <code>Q3</code>; each other bit takes its neighbour’s <strong>old</strong> value (<code>Q3 -&gt; Q2 -&gt; Q1 -&gt; Q0</code>).</li>
+<li><strong>Hold (<code>E = 0</code>):</strong> keep the stored bits unchanged, even at a rising edge.</li>
+</ul>
+<p>Between clock edges, changing <code>E</code>, <code>s_l</code>, or the data inputs does not change the stored bits. Asynchronous reset is the exception: <code>resetn = 0</code> clears them without waiting for an edge.</p>
+<pre role="region" tabindex="0" aria-label="Four-bit shift register" class="text"><code>                             Q3                       Q2                       Q1                       Q0
+                              ^                        ^                        ^                        ^
+                              |                        |                        |                        |
+resetn ---------------*-------|----------------*-------|----------------*-------|----------------+       |
+                      o       |                o       |                o       |                o       |
+                 +---------+  |           +---------+  |           +---------+  |           +---------+  |
+             +--&gt;|D       Q|--*       +--&gt;|D       Q|--*       +--&gt;|D       Q|--*       +--&gt;|D       Q|--+
+             |   |         |  |       |   |         |  |       |   |         |  |       |   |         |
+E -----------|--&gt;|E--------|--|-------|--&gt;|E--------|--|-------|--&gt;|E--------|--|-------|--&gt;|E        |
+             |   |         |  |       |   |         |  |       |   |         |  |       |   |         |
+clk ----*----|--&gt;|&gt;        |  |  +----|--&gt;|&gt;        |  |  +----|--&gt;|&gt;        |  |  +----|--&gt;|&gt;        |
+        |    |   +---------+  |  |    |   +---------+  |  |    |   +---------+  |  |    |   +---------+
+        +----|----------------|--*----|----------------|--*----|----------------|--+    |
+         +---+---+            |   +---+---+            |   +---+---+            |   +---+---+
+         | MUX   |&lt;+          |   | MUX   |&lt;+          |   | MUX   |&lt;+          |   | MUX   |&lt;+
+         | 0   1 | |          |   | 0   1 | |          |   | 0   1 | |          |   | 0   1 | |
+         +-------+ |          |   +-------+ |          |   +-------+ |          |   +-------+ |
+           ^   ^   |          |     ^   ^   |          |     ^   ^   |          |     ^   ^   |
+           |   |   |          +-----+   |   |          +-----+   |   |          +-----+   |   |
+           |   |   *--------------------|---*--------------------|---*--------------------|---+
+           |   |   |                    |                        |                        |
+          din D3  s_l                  D2                       D1                       D0</code></pre>
+<p>All four flip-flops receive the same <code>E</code>, <code>clk</code>, and <code>resetn</code>. All four muxes receive the same <code>s_l</code>: port <code>0</code> selects the shift path (<code>din</code> into <code>Q3</code>, then each old <code>Q</code> into the next stage), while port <code>1</code> selects the parallel inputs <code>D3 D2 D1 D0</code>.</p>
+<div class="table-scroll" role="region" tabindex="0" aria-label="Four-bit register control table">
+<table>
+<thead>
+<tr>
+<th><code>resetn</code></th>
+<th><code>E</code></th>
+<th><code>s_l</code></th>
+<th>When</th>
+<th>Resulting <code>Q3 Q2 Q1 Q0</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td><code>X</code></td>
+<td><code>X</code></td>
+<td>Immediately</td>
+<td><code>0000</code> (reset)</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td><code>0</code></td>
+<td><code>X</code></td>
+<td>At a rising clock edge</td>
+<td>Unchanged (hold)</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td><code>1</code></td>
+<td><code>1</code></td>
+<td>At a rising clock edge</td>
+<td><code>D3 D2 D1 D0</code> (load)</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td><code>1</code></td>
+<td><code>0</code></td>
+<td>At a rising clock edge</td>
+<td><code>din</code>, old <code>Q3</code>, old <code>Q2</code>, old <code>Q1</code> (shift)</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><code>X</code> means either 0 or 1: those controls do not matter in that row. For example, if <code>Q3 Q2 Q1 Q0 = 1010</code> and <code>din = 1</code>, one enabled shift changes the register to <code>1101</code>; the old <code>Q0</code> leaves the four stored bits. <code>s_l</code> chooses whether shift data or parallel-load data is waiting at each flip-flop’s <code>D</code> input. <code>E</code> decides whether the flip-flops may store that data. Changing either signal does not immediately change <code>Q3 Q2 Q1 Q0</code>; the register waits for the next rising edge of <code>clk</code>. Reset is different: <code>resetn = 0</code> clears the stored bits to <code>0000</code> without waiting for a clock edge.</p>
+
+    <aside class="reference-box" aria-label="Source and attribution">
+      <p class="reference-label"><strong>Reference</strong></p>
+      <p>This note follows a 2023 microprocessor teaching handout based on the <a href="https://dl.acm.org/doi/book/10.5555/3027670">referenced book</a>. Circuit diagrams are redrawn in text and the explanations are study synthesis; the handout itself is not reproduced.</p>
+    </aside>
+  </main>
+  <footer><div class="wrap">© 2026 Jack Byun</div></footer>
+</body>
+</html>

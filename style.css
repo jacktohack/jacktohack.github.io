@@ -49,6 +49,10 @@ footer { border-top: 1px solid var(--line); padding-block: 25px; color: var(--mu
 .article pre { overflow-x: auto; padding: 14px; border: 1px solid var(--line); border-radius: 5px; background: var(--header); font-size: .84rem; line-height: 1.5; }
 .article code { overflow-wrap: anywhere; }
 .article pre code { overflow-wrap: normal; }
+.article .table-scroll { max-width: 100%; overflow-x: auto; margin: 20px 0; }
+.article .table-scroll table { width: 100%; border-collapse: collapse; }
+.article .table-scroll th, .article .table-scroll td { padding: 9px 14px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; white-space: nowrap; }
+.article .table-scroll th { background: var(--header); font-weight: 650; }
 .article p, .article li { max-width: 75ch; }
 .article .reference-box { margin-top: 36px; padding: 20px; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 5px; background: var(--header); font-size: .92rem; }
 .article .reference-box p { margin: 0; }
