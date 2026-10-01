@@ -67,8 +67,7 @@ page = f'''<!doctype html>
 {content}
     <aside class="reference-box" aria-label="Source and attribution">
       <p class="reference-label"><strong>Reference</strong></p>
-      <p>Worked performance examples revisit a completed 2023 undergraduate microprocessor course, including textbook exercises. Explanations and text diagrams are study synthesis. Original course PDFs and screenshots are not included.</p>
-      <p><a href="performance-and-yield.md">Markdown source</a></p>
+      <p><a href="https://dl.acm.org/doi/book/10.5555/3027670">https://dl.acm.org/doi/book/10.5555/3027670</a></p>
     </aside>
   </main>
   <footer><div class="wrap">© 2026 Jack Byun</div></footer>
