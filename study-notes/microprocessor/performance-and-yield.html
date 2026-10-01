@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="CPU time, instruction count, CPI, throughput, Amdahl's law, and how chiplets and harvesting reduce manufacturing waste.">
+  <title>2. Work and Execution Rate Determine CPU Time, While Defects Limit Chip Yield — Microprocessor — Jack Byun</title>
+  <link rel="stylesheet" href="../../style.css?v=20260930-layout">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="site-header"><div class="wrap">
+    <a class="brand" href="../../">Jack Byun</a>
+    <nav aria-label="Main navigation"><a href="../">Study Notes</a> <a href="../../projects/">Projects</a> <a href="../../contributions/">Upstream Contributions</a></nav>
+  </div></header>
+  <main class="wrap article" id="content">
+    <p class="breadcrumbs"><a href="../">Study Notes</a> / <a href="./">Microprocessor</a></p>
+<h1 id="2-work-and-execution-rate-determine-cpu-time-while-defects-limit-chip-yield">2. Work and Execution Rate Determine CPU Time, While Defects Limit Chip Yield</h1>
+<p class="article-dates">Created <time datetime="2026-10-01">1 October 2026</time> · Last edited <time datetime="2026-10-01">1 October 2026</time></p>
+<p>A faster clock or fewer instructions does not automatically mean a faster program. <strong>CPU time equals executed instruction count × average cycles per instruction (CPI) ÷ clock rate.</strong> Completing more tasks per second increases throughput, but does not necessarily shorten each task. Speeding up only part of a program leaves the unchanged work as a limit on overall speedup. Manufacturing has a separate constraint: at the same defect density, larger dies tend to have lower yield—the fraction of dies that work. Chiplets and harvesting can reduce the silicon wasted by defects.</p>
+<nav class="toc-box" aria-labelledby="table-of-contents">
+<h2 id="table-of-contents">Contents</h2>
+<ul>
+<li><a href="#1-software-defines-the-work-that-the-machine-executes">1. Software Defines the Work That the Machine Executes</a>
+<ul>
+<li><a href="#11-high-level-code-expresses-operations-assembly-names-instructions-and-hardware-uses-bits">1.1 High-Level Code Expresses Operations, Assembly Names Instructions, and Hardware Uses Bits</a></li>
+<li><a href="#12-algorithms-compilers-hardware-and-io-all-affect-execution-time">1.2 Algorithms, Compilers, Hardware, and I/O All Affect Execution Time</a></li>
+<li><a href="#13-personal-server-embedded-and-supercomputers-serve-different-purposes">1.3 Personal, Server, Embedded, and Supercomputers Serve Different Purposes</a></li>
+<li><a href="#14-main-memory-loses-its-data-without-power-but-storage-keeps-it">1.4 Main Memory Loses Its Data Without Power but Storage Keeps It</a></li>
+</ul></li>
+<li><a href="#2-performance-is-measured-as-time-per-task-or-tasks-per-second">2. Performance Is Measured as Time per Task or Tasks per Second</a>
+<ul>
+<li><a href="#21-giga-is-a-billion-and-nano-is-a-billionth">2.1 Giga Is a Billion and Nano Is a Billionth</a></li>
+<li><a href="#22-cpi-is-the-average-number-of-clock-cycles-per-instruction">2.2 CPI Is the Average Number of Clock Cycles per Instruction</a></li>
+<li><a href="#23-cpu-time-equals-instruction-count-times-cpi-divided-by-clock-rate">2.3 CPU Time Equals Instruction Count Times CPI Divided by Clock Rate</a></li>
+<li><a href="#24-instructions-per-second-equal-clock-rate-divided-by-cpi">2.4 Instructions per Second Equal Clock Rate Divided by CPI</a></li>
+<li><a href="#25-higher-throughput-does-not-necessarily-shorten-each-task">2.5 Higher Throughput Does Not Necessarily Shorten Each Task</a></li>
+</ul></li>
+<li><a href="#3-no-single-factor-decides-how-fast-a-program-runs">3. No Single Factor Decides How Fast a Program Runs</a>
+<ul>
+<li><a href="#31-the-fastest-clock-can-lose-when-its-cpi-is-high">3.1 The Fastest Clock Can Lose When Its CPI Is High</a></li>
+<li><a href="#32-at-the-same-clock-rate-fewer-total-cycles-mean-less-cpu-time">3.2 At the Same Clock Rate, Fewer Total Cycles Mean Less CPU Time</a></li>
+<li><a href="#33-more-cycles-in-less-time-require-a-faster-clock">3.3 More Cycles in Less Time Require a Faster Clock</a></li>
+<li><a href="#34-amdahls-law-shows-how-unchanged-work-limits-overall-speedup">3.4 Amdahl's Law Shows How Unchanged Work Limits Overall Speedup</a></li>
+</ul></li>
+<li><a href="#4-chiplets-and-harvesting-reduce-silicon-wasted-by-manufacturing-defects">4. Chiplets and Harvesting Reduce Silicon Wasted by Manufacturing Defects</a></li>
+</ul>
+</nav>
+<h2 id="1-software-defines-the-work-that-the-machine-executes">1. Software Defines the Work That the Machine Executes</h2>
+<h3 id="11-high-level-code-expresses-operations-assembly-names-instructions-and-hardware-uses-bits">1.1 High-Level Code Expresses Operations, Assembly Names Instructions, and Hardware Uses Bits</h3>
+<p>The same operation can be represented at different levels. Use <strong>adding two numbers</strong> as an example.</p>
+<p><strong>1. High-level language — express the calculation</strong></p>
+<p>In C, you might write:</p>
+<pre role="region" tabindex="0" aria-label="C addition statement" class="c"><code>sum = a + b;</code></pre>
+<p>This says what to calculate without specifying registers or individual machine instructions.</p>
+<ul>
+<li><strong>Productivity:</strong> less low-level detail to write and manage.</li>
+<li><strong>Portability:</strong> the same source code can often be compiled for different processors.</li>
+</ul>
+<p><strong>2. Assembly language — name the machine operations</strong></p>
+<p>Assembly is a readable, textual representation of machine instructions. For example, an instruction named <code>ADD</code> might add values held in registers—small storage locations inside the CPU. The exact instruction and syntax depend on the processor.</p>
+<p>One high-level statement can require <strong>several machine instructions</strong>, such as loading values, adding them, and storing the result. There is not necessarily a one-to-one mapping between a line of C and a machine instruction.</p>
+<p><strong>3. Hardware representation — encode instructions and data as bits</strong></p>
+<p>The CPU does not read the word <code>ADD</code>. The machine instruction is encoded as a <strong>binary bit pattern</strong> identifying the operation and its operands—the values or locations it operates on. The numbers being added are also represented as bits.</p>
+<h3 id="12-algorithms-compilers-hardware-and-io-all-affect-execution-time">1.2 Algorithms, Compilers, Hardware, and I/O All Affect Execution Time</h3>
+<p>Separate <strong>how much work a program requires</strong> from <strong>how quickly the system completes it</strong>. Imagine a program that <strong>reads 100 numbers from a file and adds them together</strong>.</p>
+<p><strong>1. Algorithm — choose the steps</strong></p>
+<p>Start with the first number, then add the remaining 99 numbers. This algorithm requires <strong>99 additions</strong>. The algorithm determines the operations needed to solve the problem.</p>
+<p><strong>2. Programming language, compiler, and architecture — turn operations into instructions</strong></p>
+<p>An addition in the algorithm is not necessarily one machine instruction. Executing the program may also require instructions to load values, advance through the numbers, and control a loop.</p>
+<p>The language expresses the algorithm, the compiler translates the code, and the <strong>instruction-set architecture</strong> defines the machine instructions available. Together, they influence how many machine instructions execute per operation and therefore the <strong>total executed instruction count</strong>.</p>
+<p><strong>3. Processor and memory system — execute the instructions</strong></p>
+<p>The processor executes instructions, but it also needs their data. Waiting for data from memory can add CPU cycles. The <strong>clock rate</strong> and <strong>average cycles per instruction (CPI)</strong> determine how long a given number of executed instructions takes.</p>
+<p><strong>4. I/O system and OS — move data into and out of the program</strong></p>
+<p>To obtain the numbers, the program asks the OS to read the file. If the data must be fetched from storage, the program may wait for the read to finish. That waiting increases <strong>response time</strong>, even while the program is not using the CPU.</p>
+<h3 id="13-personal-server-embedded-and-supercomputers-serve-different-purposes">1.3 Personal, Server, Embedded, and Supercomputers Serve Different Purposes</h3>
+<div class="table-scroll" role="region" tabindex="0" aria-label="Computer classes">
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Typical purpose and constraints</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Personal computer</td>
+<td>Serves an individual user</td>
+</tr>
+<tr>
+<td>Server computer</td>
+<td>Provides network-based services, emphasizing capacity, performance, and reliability; server systems range from small machines to building-sized installations</td>
+</tr>
+<tr>
+<td>Embedded computer</td>
+<td>Forms part of another system, often with strict power, performance, and cost constraints</td>
+</tr>
+<tr>
+<td>Supercomputer</td>
+<td>Targets large computational workloads</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h3 id="14-main-memory-loses-its-data-without-power-but-storage-keeps-it">1.4 Main Memory Loses Its Data Without Power but Storage Keeps It</h3>
+<ul>
+<li><strong>Volatile memory</strong> needs power to retain its contents. Main memory such as SDRAM is volatile.</li>
+<li><strong>Nonvolatile storage</strong> retains data without continuous power. Examples include flash memory, magnetic disks, and optical disks such as DVDs and CD-ROMs.</li>
+</ul>
+<p>Storage capacity or executable-file size alone does not tell you how much work a CPU performs during a program run.</p>
+<h2 id="2-performance-is-measured-as-time-per-task-or-tasks-per-second">2. Performance Is Measured as Time per Task or Tasks per Second</h2>
+<h3 id="21-giga-is-a-billion-and-nano-is-a-billionth">2.1 Giga Is a Billion and Nano Is a Billionth</h3>
+<div class="table-scroll" role="region" tabindex="0" aria-label="Decimal number prefixes">
+<table>
+<thead>
+<tr>
+<th>Number</th>
+<th style="text-align: right;">Digits</th>
+<th style="text-align: right;">Power of ten</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Thousand</td>
+<td style="text-align: right;">1,000</td>
+<td style="text-align: right;"><code>10³</code></td>
+</tr>
+<tr>
+<td>Million</td>
+<td style="text-align: right;">1,000,000</td>
+<td style="text-align: right;"><code>10⁶</code></td>
+</tr>
+<tr>
+<td>Billion</td>
+<td style="text-align: right;">1,000,000,000</td>
+<td style="text-align: right;"><code>10⁹</code></td>
+</tr>
+</tbody>
+</table>
+</div>
+<ul>
+<li><strong>Giga (<code>G</code>)</strong> means <code>10⁹</code>: <code>1 GHz = 1 billion cycles/s</code>.</li>
+<li><strong>Nano (<code>n</code>)</strong> means <code>10⁻⁹</code>: <code>1 ns = one billionth of a second</code>.</li>
+<li>Therefore, <code>1 s = 1 billion ns</code>. A rate of <code>1 cycle/ns</code> equals <code>1 billion cycles/s = 1 GHz</code>.</li>
+</ul>
+<h3 id="22-cpi-is-the-average-number-of-clock-cycles-per-instruction">2.2 CPI Is the Average Number of Clock Cycles per Instruction</h3>
+<p>Use one example throughout this section: <strong>100 machine instructions executed on a 1 GHz CPU</strong>.</p>
+<ul>
+<li><strong>CPU:</strong> the processor that executes instructions, such as loading a value or adding numbers.</li>
+<li><strong>Instruction count (<code>IC</code>):</strong> the number of machine instructions <em>executed during the run</em>. Here, <code>IC = 100</code>; it is not a count of source-code lines or executable-file bytes.</li>
+<li><strong>Clock cycle:</strong> one repetition of the clock signal, from one rising edge to the next. A cycle is not necessarily one completed instruction.</li>
+<li><strong>Clock rate (<code>f</code>):</strong> cycles per second. At <code>1 GHz</code>, the clock repeats <code>10⁹</code> times per second.</li>
+<li><strong>Clock period:</strong> the duration of one cycle, <code>1/f</code>. At <code>1 GHz</code>, one cycle lasts <code>1 ns</code>.</li>
+<li><strong>CPI (cycles per instruction):</strong> the average number of cycles per executed instruction.</li>
+</ul>
+<p>For example, if 50 instructions take one cycle each and 50 take two:</p>
+<pre role="region" tabindex="0" aria-label="Average cycles per instruction calculation" class="text"><code>total cycles = 50 × 1 + 50 × 2 = 150 cycles
+CPI = 150 cycles / 100 instructions = 1.5 cycles/instruction</code></pre>
+<p>No individual instruction in this example takes 1.5 cycles; <strong>1.5 is the average</strong>.</p>
+<p>The 1 GHz clock looks like this:</p>
+<pre role="region" tabindex="0" aria-label="One gigahertz clock waveform" class="text"><code>          |&lt;-- 1 cycle --&gt;|
+          ↑       ↓       ↑       ↓       ↑
+           _______         _______         ____
+clock   __|       |_______|       |_______|
+          0      0.5     1.0     1.5     2.0 ns
+
+↑ rising edge (low → high)   ↓ falling edge (high → low)</code></pre>
+<h3 id="23-cpu-time-equals-instruction-count-times-cpi-divided-by-clock-rate">2.3 CPU Time Equals Instruction Count Times CPI Divided by Clock Rate</h3>
+<p>CPU time answers: <strong>how much processor time does this run require?</strong></p>
+<pre role="region" tabindex="0" aria-label="CPU time equations" class="text"><code>cycles = IC × CPI
+CPU time = cycles / f = IC × CPI / f
+         = cycles × clock period</code></pre>
+<p>For the 100-instruction example:</p>
+<ol type="1">
+<li><strong>Count cycles:</strong> <code>100 instructions × 1.5 cycles/instruction = 150 cycles</code>.</li>
+<li><strong>Convert cycles to time:</strong> <code>150 cycles × 1 ns/cycle = 150 ns</code>.</li>
+</ol>
+<p>The run therefore needs <strong>150 ns of CPU time</strong>. The units agree: <code>(instructions × cycles/instruction) / (cycles/second) = seconds</code>.</p>
+<p><strong>Working backward from time:</strong> suppose a different run uses a 2 GHz CPU for 5 s at CPI 2.</p>
+<ol type="1">
+<li>Cycles: <code>5 s × 2 billion cycles/s = 10 billion cycles</code>.</li>
+<li>Instructions: <code>10 billion cycles / 2 cycles/instruction = 5 billion instructions</code>.</li>
+</ol>
+<h3 id="24-instructions-per-second-equal-clock-rate-divided-by-cpi">2.4 Instructions per Second Equal Clock Rate Divided by CPI</h3>
+<p>Instruction throughput answers: <strong>how many instructions complete per second?</strong> It is a rate, not the duration of one run.</p>
+<pre role="region" tabindex="0" aria-label="Instruction throughput equation" class="text"><code>instruction throughput = f / CPI</code></pre>
+<p>For the same 1 GHz CPU at CPI 1.5:</p>
+<ol type="1">
+<li>The clock supplies <code>1 billion cycles/s</code>.</li>
+<li>Each instruction uses <code>1.5 cycles</code> on average.</li>
+<li>Throughput is <code>1 billion cycles/s / 1.5 cycles/instruction ≈ 667 million instructions/s</code>.</li>
+</ol>
+<p>The cycle units cancel, leaving <strong>instructions per second</strong>. This rate applies at the given clock rate and CPI; a different instruction mix can change CPI and therefore throughput.</p>
+<p><strong>Cross-check using the run:</strong></p>
+<pre role="region" tabindex="0" aria-label="Instruction throughput cross-check" class="text"><code>100 instructions / 150 ns ≈ 0.667 instructions/ns
+0.667 instructions/ns × 1 billion ns/s ≈ 667 million instructions/s</code></pre>
+<p>A <strong>1 GHz</strong> CPU does not necessarily execute <strong>1 billion instructions/s</strong>. The clock counts cycles; at CPI 1.5, instructions require more than one cycle on average.</p>
+<h3 id="25-higher-throughput-does-not-necessarily-shorten-each-task">2.5 Higher Throughput Does Not Necessarily Shorten Each Task</h3>
+<div class="table-scroll" role="region" tabindex="0" aria-label="Performance measures">
+<table>
+<thead>
+<tr>
+<th>Measure</th>
+<th>What it describes</th>
+<th>Example unit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CPU time</td>
+<td>Processor time used by a program</td>
+<td>ns or s</td>
+</tr>
+<tr>
+<td>Response time (elapsed time)</td>
+<td>Time from starting a task to finishing it, including waiting and I/O</td>
+<td>ns or s</td>
+</tr>
+<tr>
+<td>Throughput</td>
+<td>Work completed per unit time</td>
+<td>instructions/s or program runs/s</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>A <strong>run</strong> means executing the entire 100-instruction program once. Each run needs <strong>150 ns of CPU time</strong>. Assume no waiting, I/O, or additional overhead, so its <strong>response time is also 150 ns</strong>.</p>
+<p><strong>One CPU — runs happen one after another</strong></p>
+<pre role="region" tabindex="0" aria-label="Single CPU timeline" class="text"><code>       0 ns            150 ns          300 ns
+CPU 1  |---- Run A ----|---- Run B ----|</code></pre>
+<p>Run A finishes after 150 ns, then Run B starts. The CPU completes <strong>one run every 150 ns</strong>. Since one second contains 1 billion nanoseconds:</p>
+<pre role="region" tabindex="0" aria-label="Single CPU throughput" class="text"><code>throughput = 1,000,000,000 ns/s ÷ 150 ns/run
+           ≈ 6.67 million runs/s</code></pre>
+<p><strong>Two identical CPUs — separate runs happen at the same time</strong></p>
+<pre role="region" tabindex="0" aria-label="Two CPU timeline" class="text"><code>       0 ns            150 ns          300 ns
+CPU 1  |---- Run A ----|---- Run C ----|
+CPU 2  |---- Run B ----|---- Run D ----|</code></pre>
+<p>With independent runs and no shared bottleneck, <strong>two runs finish every 150 ns</strong>, rather than one:</p>
+<pre role="region" tabindex="0" aria-label="Two CPU throughput" class="text"><code>total throughput ≈ 2 × 6.67 million runs/s
+                 ≈ 13.3 million runs/s</code></pre>
+<p>But <strong>Run A still takes 150 ns</strong>. CPU 2 executes a separate run; it does not help CPU 1 finish Run A faster.</p>
+<h2 id="3-no-single-factor-decides-how-fast-a-program-runs">3. No Single Factor Decides How Fast a Program Runs</h2>
+<h3 id="31-the-fastest-clock-can-lose-when-its-cpi-is-high">3.1 The Fastest Clock Can Lose When Its CPI Is High</h3>
+<p>For program performance, compare <strong>execution times for the same program and workload</strong>. A higher clock rate alone is not enough: instruction count and CPI also matter.</p>
+<p>Consider three processors executing the same instruction set, with the following CPIs for the workloads being considered:</p>
+<div class="table-scroll" role="region" tabindex="0" aria-label="Processor clock rates and CPI">
+<table>
+<thead>
+<tr>
+<th>Processor</th>
+<th style="text-align: right;">Clock rate</th>
+<th style="text-align: right;">CPI</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1</td>
+<td style="text-align: right;">3 GHz</td>
+<td style="text-align: right;">1.5</td>
+</tr>
+<tr>
+<td>P2</td>
+<td style="text-align: right;">2.5 GHz</td>
+<td style="text-align: right;">1.0</td>
+</tr>
+<tr>
+<td>P3</td>
+<td style="text-align: right;">4.0 GHz</td>
+<td style="text-align: right;">2.2</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Instruction throughput:</strong> divide each clock rate by its CPI.</p>
+<div class="table-scroll" role="region" tabindex="0" aria-label="Processor instruction throughput">
+<table>
+<thead>
+<tr>
+<th>Processor</th>
+<th style="text-align: right;">Instructions per second</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1</td>
+<td style="text-align: right;"><code>3 billion / 1.5 = 2.0 billion</code></td>
+</tr>
+<tr>
+<td>P2</td>
+<td style="text-align: right;"><code>2.5 billion / 1.0 = 2.5 billion</code></td>
+</tr>
+<tr>
+<td>P3</td>
+<td style="text-align: right;"><code>4 billion / 2.2 ≈ 1.82 billion</code></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>P2 has the highest instruction throughput</strong>, even though P3 has the fastest clock.</p>
+<p><strong>Work performed in 10 seconds:</strong> multiply the clock rate by 10 s, then divide cycles by CPI.</p>
+<div class="table-scroll" role="region" tabindex="0" aria-label="Cycles and instructions in ten seconds">
+<table>
+<thead>
+<tr>
+<th>Processor</th>
+<th style="text-align: right;">Cycles in 10 s</th>
+<th style="text-align: right;">Instructions in 10 s</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1</td>
+<td style="text-align: right;"><code>3 billion × 10 = 30 billion</code></td>
+<td style="text-align: right;"><code>30 billion / 1.5 = 20 billion</code></td>
+</tr>
+<tr>
+<td>P2</td>
+<td style="text-align: right;"><code>2.5 billion × 10 = 25 billion</code></td>
+<td style="text-align: right;"><code>25 billion / 1.0 = 25 billion</code></td>
+</tr>
+<tr>
+<td>P3</td>
+<td style="text-align: right;"><code>4 billion × 10 = 40 billion</code></td>
+<td style="text-align: right;"><code>40 billion / 2.2 ≈ 18.18 billion</code></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The table above fixes the <strong>time at 10 s</strong> and asks how many instructions each CPU executes. At their stated CPIs, P1 executes 20 billion instructions, P2 executes 25 billion, and P3 executes about 18.18 billion. Equal running time does not mean equal instruction counts.</p>
+<p>To compare completion times instead, fix the <strong>instruction count</strong>. Suppose all three execute 20 billion instructions, still at their stated clock rates and CPIs. Use <code>CPU time = IC × CPI / f</code>:</p>
+<div class="table-scroll" role="region" tabindex="0" aria-label="Runtime for a fixed instruction count">
+<table>
+<thead>
+<tr>
+<th>Processor</th>
+<th>Time to execute 20 billion instructions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1</td>
+<td><code>20 billion × 1.5 / (3 billion cycles/s) = 10 s</code></td>
+</tr>
+<tr>
+<td>P2</td>
+<td><code>20 billion × 1.0 / (2.5 billion cycles/s) = 8 s</code></td>
+</tr>
+<tr>
+<td>P3</td>
+<td><code>20 billion × 2.2 / (4 billion cycles/s) = 11 s</code></td>
+</tr>
+</tbody>
+</table>
+</div>
+<h3 id="32-at-the-same-clock-rate-fewer-total-cycles-mean-less-cpu-time">3.2 At the Same Clock Rate, Fewer Total Cycles Mean Less CPU Time</h3>
+<p>Compiler optimization options can change both instruction count and the mix of instruction classes. To compare runtimes, <strong>sum cycles, not just instructions</strong>.</p>
+<p>Suppose three compiled versions have these executed instruction counts:</p>
+<div class="table-scroll" role="region" tabindex="0" aria-label="Instruction class CPI and counts">
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th style="text-align: right;">A</th>
+<th style="text-align: right;">B</th>
+<th style="text-align: right;">C</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CPI</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr>
+<td>Program 1 instruction counts</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td>Program 2 instruction counts</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">4</td>
+</tr>
+<tr>
+<td>Program 3 instruction counts</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">3</td>
+</tr>
+</tbody>
+</table>
+</div>
+<pre role="region" tabindex="0" aria-label="Instruction class cycle equations" class="text"><code>total instructions = sum of the class instruction counts
+total cycles = sum of (class instruction count × class CPI)
+overall CPI = total cycles / total instructions
+CPU time = total cycles / f</code></pre>
+<div class="table-scroll" role="region" tabindex="0" aria-label="Compiled program cycle totals">
+<table>
+<thead>
+<tr>
+<th>Program</th>
+<th style="text-align: right;">Total instructions</th>
+<th style="text-align: right;">Total cycles</th>
+<th style="text-align: right;">Overall CPI</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td style="text-align: right;"><code>5 + 2 + 2 = 9</code></td>
+<td style="text-align: right;"><code>5×1 + 2×2 + 2×3 = 15</code></td>
+<td style="text-align: right;"><code>15/9 ≈ 1.67</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td style="text-align: right;"><code>1 + 2 + 4 = 7</code></td>
+<td style="text-align: right;"><code>1×1 + 2×2 + 4×3 = 17</code></td>
+<td style="text-align: right;"><code>17/7 ≈ 2.43</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td style="text-align: right;"><code>3 + 2 + 3 = 8</code></td>
+<td style="text-align: right;"><code>3×1 + 2×2 + 3×3 = 16</code></td>
+<td style="text-align: right;"><code>16/8 = 2</code></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>At the same clock rate:</p>
+<ul>
+<li><strong>Runtime:</strong> program 1 needs the fewest cycles (15), followed by program 3 (16) and program 2 (17). Program 1 finishes first; programs 2 and 3 do not take the same time.</li>
+<li><strong>Executed instruction count:</strong> program 2 executes the fewest instructions (7) but needs the most cycles (17). Program 1 executes more instructions (9) than program 3 (8), yet finishes sooner. These counts do <strong>not</strong> tell us the executable files' sizes in bytes.</li>
+<li><strong>Class CPI:</strong> class A averages 1 cycle per instruction, while class B averages 2. These are class averages, not guaranteed latencies for each individual instruction.</li>
+<li><strong>Faster clock:</strong> at 1 GHz, a cycle lasts 1 ns, so programs 1, 2, and 3 take 15, 17, and 16 ns. At 2 GHz, a cycle lasts 0.5 ns. <strong>If their cycle counts stay the same</strong>, their times become 7.5, 8.5, and 8 ns. Each takes half its previous time, so all three have a 2× speedup.</li>
+</ul>
+<h3 id="33-more-cycles-in-less-time-require-a-faster-clock">3.3 More Cycles in Less Time Require a Faster Clock</h3>
+<p>Return to P1, P2, and P3. Suppose execution time must fall <strong>30%</strong>, but CPI rises <strong>20%</strong>, with instruction count unchanged.</p>
+<p><strong>Translate the percentages:</strong></p>
+<ul>
+<li>New time is <code>100% − 30% = 70%</code>, or <code>0.7 ×</code> old time.</li>
+<li>New CPI is <code>100% + 20% = 120%</code>, or <code>1.2 ×</code> old CPI.</li>
+<li>The unknown is the new clock rate, <code>f_new</code>.</li>
+</ul>
+<p><strong>Write the old and new times, then solve:</strong></p>
+<pre role="region" tabindex="0" aria-label="Required clock rate derivation" class="text"><code>old time = IC × CPI / f
+new time = IC × (1.2 × CPI) / f_new
+
+IC × 1.2 × CPI / f_new = 0.7 × IC × CPI / f
+1.2 / f_new = 0.7 / f             (cancel IC × CPI)
+1.2 × f = 0.7 × f_new            (multiply by f × f_new)
+f_new = f × 1.2 / 0.7 ≈ 1.714 × f</code></pre>
+<p>The clock must compensate for <strong>more cycles per instruction</strong> while also completing the run in <strong>less time</strong>.</p>
+<div class="table-scroll" role="region" tabindex="0" aria-label="Required new processor clock rates">
+<table>
+<thead>
+<tr>
+<th>Processor</th>
+<th style="text-align: right;">Required new clock rate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1</td>
+<td style="text-align: right;"><code>3 GHz × 1.2 / 0.7 ≈ 5.14 GHz</code></td>
+</tr>
+<tr>
+<td>P2</td>
+<td style="text-align: right;"><code>2.5 GHz × 1.2 / 0.7 ≈ 4.29 GHz</code></td>
+</tr>
+<tr>
+<td>P3</td>
+<td style="text-align: right;"><code>4.0 GHz × 1.2 / 0.7 ≈ 6.86 GHz</code></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Check with P1 and 100 instructions:</strong></p>
+<ol type="1">
+<li>Old run: <code>100 × 1.5 = 150 cycles</code> at <code>3 cycles/ns</code> takes <code>150 / 3 = 50 ns</code>.</li>
+<li>Target time: <code>0.7 × 50 = 35 ns</code>.</li>
+<li>New CPI: <code>1.5 × 1.2 = 1.8</code>; the run now needs <code>100 × 1.8 = 180 cycles</code>.</li>
+<li>Required rate: <code>180 cycles / 35 ns ≈ 5.14 cycles/ns = 5.14 GHz</code>.</li>
+</ol>
+<h3 id="34-amdahls-law-shows-how-unchanged-work-limits-overall-speedup">3.4 Amdahl's Law Shows How Unchanged Work Limits Overall Speedup</h3>
+<p>A program takes <strong>150 seconds</strong>: 120 seconds multiplying and 30 seconds doing other work. Only multiplication can be sped up. Let <code>s</code> mean <strong>how many times faster multiplication becomes</strong>; <code>s</code> is a factor, not seconds.</p>
+<div class="table-scroll" role="region" tabindex="0" aria-label="Multiplication speedup time breakdown">
+<table>
+<thead>
+<tr>
+<th>Part</th>
+<th style="text-align: right;">Original time</th>
+<th style="text-align: right;">New time</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Other work</td>
+<td style="text-align: right;">30 s</td>
+<td style="text-align: right;">30 s (unchanged)</td>
+</tr>
+<tr>
+<td>Multiplication</td>
+<td style="text-align: right;">120 s</td>
+<td style="text-align: right;"><code>120/s</code> seconds</td>
+</tr>
+<tr>
+<td>Whole program</td>
+<td style="text-align: right;">150 s</td>
+<td style="text-align: right;"><code>30 + 120/s</code> seconds</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>How fast must multiplication become to make the whole program 3× faster?</strong></p>
+<ol type="1">
+<li>A 3× whole-program speedup means a new total time of <code>150/3 = 50 s</code>.</li>
+<li>Other work still takes 30 s, so multiplication can take only <code>50 − 30 = 20 s</code>.</li>
+<li>Multiplication must fall from 120 s to 20 s: <code>s = 120/20 = 6</code>.</li>
+</ol>
+<p>Check with the table: <code>new time = 30 + 120/6 = 50 s</code>; whole-program speedup is <code>150/50 = 3×</code>. <strong>The multiplication part becomes 6× faster, but the whole program becomes only 3× faster.</strong></p>
+<p><strong>Where does Amdahl's formula come from?</strong> Divide each term in the table's new-time equation by the <strong>original 150 seconds</strong>:</p>
+<pre role="region" tabindex="0" aria-label="Execution time fractions" class="text"><code>new time / old time = 30/150 + (120/150)/s
+                    =    0.2 +     0.8/s</code></pre>
+<p>Here <code>0.2</code> is the fraction of original time spent on unchanged work, and <code>0.8</code> is the fraction spent multiplying. With <code>s = 6</code>, the new-time fraction is <code>0.2 + 0.8/6 = 1/3</code>: the new run takes one-third as long. Speedup is <strong>old time / new time</strong>, so it is <code>1 / (1/3) = 3×</code>.</p>
+<p>For any program, call the <strong>original-time fraction being improved</strong> <code>p</code> (here <code>p = 120/150 = 0.8</code>). The remaining fraction is <code>1 − p</code> (here <code>30/150 = 0.2</code>):</p>
+<pre role="region" tabindex="0" aria-label="Amdahl speedup equations" class="text"><code>new time / old time = (1 − p) + p/s
+whole-program speedup = 1 / [(1 − p) + p/s]</code></pre>
+<p><strong>The limit:</strong> even if multiplication took almost no time (<code>s</code> grew without bound), the 30 seconds of other work would remain. The maximum possible whole-program speedup is <code>150/30 = 5×</code>, or in the fraction form <code>1/(1 − p) = 1/0.2 = 5×</code>. These numbers measure different things: <strong>6×</strong> is the improvement multiplication needs for the whole program to run <strong>3×</strong> faster; <strong>5×</strong> is the greatest improvement the <em>whole program</em> could ever achieve by speeding up multiplication alone.</p>
+<h2 id="4-chiplets-and-harvesting-reduce-silicon-wasted-by-manufacturing-defects">4. Chiplets and Harvesting Reduce Silicon Wasted by Manufacturing Defects</h2>
+<p>Chips are made many at a time on one round slice of silicon, the <strong>wafer</strong>. The finished wafer is cut into rectangles, and each rectangle is one chip, a <strong>die</strong>. The circuit layout fixes the die boundaries before fabrication; cutting only separates the finished dies. For this comparison, hold wafer area and fabrication cost fixed.</p>
+<p>Manufacturing can introduce flaws, for example from contamination. <strong>Yield</strong> is the fraction of candidate dies that work: <code>working dies / candidate dies</code>. In the simplified diagram below, each <code>x</code> marks a defect that makes its die unusable, and the three defects hit different dies. Real defects do not always ruin a whole die; the location and the design matter.</p>
+<pre role="region" tabindex="0" aria-label="Small and large die yield illustration" class="text"><code>   small dies                     big dies
+   illustrative layouts, not to scale
+ ┌──┬──┬──┬──┬──┬──┐           ┌─────┬─────┬─────┐
+ │  │x │  │  │  │  │           │  x  │     │     │
+ ├──┼──┼──┼──┼──┼──┤           │     │     │  x  │
+ │  │  │  │  │x │  │           ├─────┼─────┼─────┤
+ ├──┼──┼──┼──┼──┼──┤           │     │     │     │
+ │  │  │x │  │  │  │           │  x  │     │     │
+ └──┴──┴──┴──┴──┴──┘           └─────┴─────┴─────┘
+ 3 of 18 dies dead              3 of 6 dies dead
+ yield ≈ 83%                    yield = 50%</code></pre>
+<p>In this example, the rest of a damaged die cannot be sold independently, so <strong>the whole die is discarded</strong>. Each discarded die takes otherwise usable silicon with it. Ignoring wafer-edge losses, the area comparison is:</p>
+<pre role="region" tabindex="0" aria-label="Discarded die area comparison" class="text"><code>small dies: each die = 1/18 of the wafer
+  3 defects → throw away 3 × 1/18 = 3/18 of the wafer → 17% lost, 83% works
+
+big dies:   each die = 1/6 of the wafer
+  3 defects → throw away 3 × 1/6  = 3/6  of the wafer → 50% lost, 50% works</code></pre>
+<p>The same number of defects discards more silicon in the big-die example. <strong>At the same defect density, a larger die has a greater chance of containing a damaging defect and therefore tends to have lower yield.</strong> Two design approaches can reduce this waste.</p>
+<p><strong>Chiplets — build from separately tested pieces.</strong> Design the accelerator as several smaller dies connected inside one package, rather than one huge die. Test the dies before assembly and select good ones. A bad die can then be discarded without discarding the other pieces. Packaging and die-to-die connections have their own costs and failure risks.</p>
+<pre role="region" tabindex="0" aria-label="Chiplets tested before package assembly" class="text"><code>one huge die                 chiplets tested before assembly
+┌───────────────┐            ┌──────┐ ┌──────┐
+│        x      │            │  x   │ │ good │
+│               │            └──────┘ └──────┘
+└───────────────┘             discard    keep
+ discard if unusable         ┌──────┐ ┌──────┐
+                             │ good │ │ good │
+                             └──────┘ └──────┘
+                                keep     keep
+                             select another good die,
+                             then assemble the package</code></pre>
+<p><strong>Harvesting — disable a faulty block and keep the usable chip.</strong> A GPU contains repeated compute units as well as shared components. Picture the compute units as workers doing similar jobs. In a simplified example, there are 8 units and a defect breaks unit 2:</p>
+<pre role="region" tabindex="0" aria-label="Eight compute units with one faulty unit" class="text"><code>unit:  0  1  2  3  4  5  6  7
+       ✓  ✓  ✗  ✓  ✓  ✓  ✓  ✓     ← a defect broke unit 2</code></pre>
+<p>If the design allows unit 2 to be disabled and the rest of the chip passes testing, the factory can <strong>permanently disable</strong> it, for example through fuse settings. The chip might then be sold with fewer enabled units rather than discarded. Seven remaining units is an illustration, not a claim about a real product; some designs disable units in groups. A defect in essential shared circuitry may still make the chip unusable.</p>
+<p><strong>Why the enabled hardware configuration matters to the driver.</strong> Two chips using the same design can expose different numbers of enabled units:</p>
+<pre role="region" tabindex="0" aria-label="Two enabled compute unit configurations" class="text"><code>chip A:  ✓ ✓ ✓ ✓ ✓ ✓ ✓ ✓    all 8 on
+chip B:  ✓ ✓ ✗ ✓ ✓ ✓ ✓ ✓    unit 2 off</code></pre>
+<p>A driver must use the device's supported configuration rather than assume every designed unit is enabled. Depending on the GPU, hardware registers or firmware can report which resources are available. The driver can use that information for configuration and capability reporting. <strong>The driver does not generally assign each piece of work directly to an individual compute unit; GPU hardware and/or firmware handles that dispatch.</strong> This is a general distinction, not a description of a specific driver implementation.</p>
+
+    <aside class="reference-box" aria-label="Source and attribution">
+      <p class="reference-label"><strong>Reference</strong></p>
+      <p>Worked performance examples revisit a completed 2023 undergraduate microprocessor course, including textbook exercises. Explanations and text diagrams are study synthesis. Original course PDFs and screenshots are not included.</p>
+      <p><a href="performance-and-yield.md">Markdown source</a></p>
+    </aside>
+  </main>
+  <footer><div class="wrap">© 2026 Jack Byun</div></footer>
+</body>
+</html>
